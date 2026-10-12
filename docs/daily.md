@@ -16,5 +16,12 @@
 
 - 学到：Linux 20 个命令；Go 的 for 三段式 + "碗"（累加器）；`&` 取地址 / `*` 进门取值
 - 卡住：逻辑错编译器不报，只能自己对预期结果；`echo` 后面要空格
-- 明天：W1 第一天，`stu-manager` 项目开工，起锚默写 sumTo + C/D 两题 + 抽考 Linux 命令；W1 第一天，stu-manager 开工
+- 明天：起锚默写 sumTo + C/D 两题 + 抽考 Linux 命令；W1 第一天，`stu-manager` 开工
 - 数字：commit 2 条（linux-notes 的 Linux 命令笔记 + go-basics 的每日复盘）｜ 自己写的代码约 50 行（Go 练习 5 个文件：7/8/9/11/12.go）+ Linux 笔记 77 行
+
+## 2026-10-12
+
+- 学到：休息日，没有新知识（按计划允许天任务顺延 1–2 天，W1 从周二起算）
+- 卡住：无
+- 明天：起锚闭卷默写 sumTo + C/D 两题 + 抽考 Linux 命令 → merge 冲突 20min → `stu-manager` 开工（最小版：只增 + 查）｜弹性：打字 10min、岗位认知 20min
+- 数字：commit 1 条 ｜ 自己写的代码约 0 行
