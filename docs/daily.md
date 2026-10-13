@@ -25,3 +25,10 @@
 - 卡住：无
 - 明天：起锚闭卷默写 sumTo + C/D 两题 + 抽考 Linux 命令 → merge 冲突 20min → `stu-manager` 开工（最小版：只增 + 查）｜弹性：打字 10min、岗位认知 20min
 - 数字：commit 1 条 ｜ 自己写的代码约 0 行
+
+## 2026-10-13
+
+- 学到：
+- 卡住：
+- 明天：
+- 数字：commit 7 条（stu-manager 2 条：开张 + 骨架；git-practice 5 条：分支/合并/冲突练习）｜ 自己写的代码约 60 行（1.go / 2.go / 4.go / 3.go / main.go）
