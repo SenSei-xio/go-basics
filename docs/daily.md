@@ -32,3 +32,10 @@
 - 卡住：`:=`（出生）和 `=`（改值）老混，反复 `undefined: xxx`；循环体里忍不住去改计数器/条件变量；函数名对不上（定义 `sumOdd`、调用写 `sum`）；起锚考试只过 1.5/5 —— `&` 和 `*` 第 4 次搞反，`chmod 600` 和 `df -h` 说错
 - 明天：起锚复考 `sumOfEven` / `sumOdd` / `fact` 闭卷各写一遍 + `&`/`*` 口述 → 新内容 **struct（结构体）+ 方法** → `stu-manager` 实现"录入 + 查看"，目标 ≥3 条 commit
 - 数字：commit 7 条（stu-manager 2 条：开张 + 骨架；git-practice 5 条：分支/合并/冲突练习）｜ 自己写的代码约 60 行（1.go / 2.go / 4.go / 3.go / main.go）
+
+## 2026-10-14
+
+- 学到：**struct**（`type Student struct{}` 是模板、`var s Student` 做卡、`s.ID` 点号取栏位、`Println(s)` 打整张卡）；**方法**（`func (s Student) IsPass() bool`，接收者在本体里叫 `s`，调用变 `s1.IsPass()`）；**读键盘输入**（`fmt.Print("提示：")` 不换行 + `fmt.Scanln(&s.ID)` 读一行写进那一栏 —— `&` 是门牌号，要"写进去"就必须带 `&`）；把"录入一个学生"做进了 `stu-manager`
+- 卡住：`&` 和 `*` **第 5 次搞反**（最后靠"亲眼看一遍 `&x` 打印地址、`*p` 打印值"才通）；`countOdd` 写成 `sum = i`（覆盖）而不是 `count++`（计数）；`type` 和 `var` 混用；`fmt.scanln` 小写踩坑；只抄了函数签名没写函数体（`missing function body`）
+- 明天：**切片 = 一叠卡片**（`var list []Student` + `list = append(list, s)` + `for` 遍历）→ `stu-manager` 实现"查看所有学生"；补考 `&`/`*` 口述 + `countOdd`
+- 数字：commit 2 条（stu-manager：实现录入；go-basics：struct 与方法练习）｜ 自己写的代码约 50 行（`struct.go` + `main.go`）
