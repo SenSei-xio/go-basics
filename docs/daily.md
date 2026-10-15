@@ -39,3 +39,10 @@
 - 卡住：`&` 和 `*` **第 5 次搞反**（最后靠"亲眼看一遍 `&x` 打印地址、`*p` 打印值"才通）；`countOdd` 写成 `sum = i`（覆盖）而不是 `count++`（计数）；`type` 和 `var` 混用；`fmt.scanln` 小写踩坑；只抄了函数签名没写函数体（`missing function body`）
 - 明天：**切片 = 一叠卡片**（`var list []Student` + `list = append(list, s)` + `for` 遍历）→ `stu-manager` 实现"查看所有学生"；补考 `&`/`*` 口述 + `countOdd`
 - 数字：commit 2 条（stu-manager：实现录入；go-basics：struct 与方法练习）｜ 自己写的代码约 50 行（`struct.go` + `main.go`）
+
+## 2026-10-15
+
+- 学到：**切片 = 一叠卡片**（`var list []Student` 造盒 → `list = append(list, s)` 塞卡**必须接住返回值** → `len(list)` 几张 → `list[i]` 第几张 → `list[i].Name` 哪一栏）；**方法**（`func (s Student) IsPass() bool` —— 接收者挂在类型身上，调用 `s1.IsPass()` 不用自己写 `&`；`return s.Score >= 60` 里比较符号本身就是 true/false，不用 `if`）；**接收者为什么必须写在括号里**（① 给方法上户口，同包不许两个同名函数 ② 调用时省掉 `&`，也就省掉"忘了写 `&`"那类事故 ③ 接口只认方法 —— W2 的地基）；`stu-manager` 接上切片，能录 3 人并全部列出
+- 卡住：起锚补考 struct 那块只过 **1.5/7 = 21%**，根因是**分不清「图纸（type）」和「卡片（var）」** —— 这个根一断，`Student.Name` 为什么不能跑、接收者是什么、字段大小写，全都塌；指针 `&`/`*` 第 6 次搞反；`i < len(list)` 答成"5 张卡跑 6 次"；`:=` 和 `=` 又混了一次
+- 明天：复考 **指针 `&`/`*`（第 7 次）**+ 图纸 vs 卡片 + `i < len(list)` + `:=`/`=` → 新内容 **map**（给 `stu-manager` 加"按学号查找"）→ 补做拖了 6 天的**岗位认知 5 条** + **打字训练**启动
+- 数字：commit 2 条（go-basics 练习；stu-manager 查看全部学生）｜ 自己写的代码约 90 行（`slice.go` / `slice1.go` / `slice2.go` / `1.go` / `2.go` / `main.go` 改造）
