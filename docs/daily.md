@@ -60,3 +60,10 @@
 - 卡住：**做卡第 3 次写成 `s = append{"小明"，88}`**（append 是塞卡不是造卡；字段名还记成 `fenshu`，真名 `Score`）；接收者 `s` 第 3 次没答对（答"函数方法"）；Linux `df -h` 第 4 次错（这次说"搜索 h 盘"）、`chmod 600` 说成"仅自己可写、都能读"
 - 明天：**W1 最后一天（截止 10-18 23:59）** —— ①补根 40min（做卡写 10 遍 + 接收者换讲法）②map+按学号查找 1h ③删除 45min ④修改 45min ⑤JSON 持久化 1.5h ⑥包/多文件 45min ⑦读代码 45min ＋ 周检测口述
 - 数字：commit 1 条（本条复盘）｜ 自己写的代码 0 行
+
+## 2026-10-18
+
+- 学到：**W1 最后一天冲刺，CRUD 全通** —— 做卡/塞卡/遍历/map/按学号查找/**删除**（`delete(m, id)` + 切片过滤重建）/**修改**（取出改副本 `m[id] = stu` 存回 + 切片同步）/**JSON 持久化**（`json.Marshal`+`os.WriteFile` 存、`os.ReadFile`+`json.Unmarshal(data, &list)` 读、`&` 不能省）全部实跑通过；**周检测通过 4/4**（数组 vs 切片：方括号里有数字=数组、空的=切片；数组不能 append；赋值复制 vs 共享；传函数数组不变切片变）；**读代码第 1 篇完成**（`FeiBoNaQi.go` 40 行逐行注释 + 脱稿口述）；新学 **`a=b` / `b=c` 顺序不能换**（换顺序 `fibo(9)` 从 55 变 256）
+- 卡住：`i++` 口述时打成 `1++`（报错 `cannot assign to 1 (neither addressable nor a map index expression)`）；把"赋值"说成"返回"；JSON 持久化时说"没反应"，根因是 **VS Code 工作目录在 `D:\Past2`** 而 `os.ReadFile("students.json")` 是相对路径 → 已建 `.vscode/launch.json` 的 `"cwd": "${fileDirName}"` 修好；`m := make(map[int]Student)` 写了两遍 → `no new variables on left side of :=`
+- 明天：**W2（10.19~10.25）** —— Go 语法二（接口/包/错误处理）+ 单元测试 + `net/http` 读代码①；补考欠账：接收者 `s`（第 4 次）、`df -h`（第 5 次）、`chmod 600`（第 5 次）；包/多文件拆 `main.go` 从 W1 顺延
+- 数字：commit **7 条**（go-basics 6 + stu-manager 4，实际另加 docs 笔记）｜ 自己写的代码约 **180 行**（`card.go` 31 + `slice3.go` 24 + `mymap.go` 20 + `lookup.go` 28 + `main.go` 新增 ~80）
