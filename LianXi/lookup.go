@@ -19,4 +19,10 @@ func main() {
 
 	stu, ok := m[want]
 	fmt.Println(ok, stu.Name)
+
+	if ok {
+		fmt.Println("找到了", stu.Name, stu.Score)
+	} else {
+		fmt.Println("没有这个学号")
+	}
 }
