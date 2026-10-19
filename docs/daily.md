@@ -67,3 +67,10 @@
 - 卡住：`i++` 口述时打成 `1++`（报错 `cannot assign to 1 (neither addressable nor a map index expression)`）；把"赋值"说成"返回"；JSON 持久化时说"没反应"，根因是 **VS Code 工作目录在 `D:\Past2`** 而 `os.ReadFile("students.json")` 是相对路径 → 已建 `.vscode/launch.json` 的 `"cwd": "${fileDirName}"` 修好；`m := make(map[int]Student)` 写了两遍 → `no new variables on left side of :=`
 - 明天：**W2（10.19~10.25）** —— Go 语法二（接口/包/错误处理）+ 单元测试 + `net/http` 读代码①；补考欠账：接收者 `s`（第 4 次）、`df -h`（第 5 次）、`chmod 600`（第 5 次）；包/多文件拆 `main.go` 从 W1 顺延
 - 数字：commit **7 条**（go-basics 6 + stu-manager 4，实际另加 docs 笔记）｜ 自己写的代码约 **180 行**（`card.go` 31 + `slice3.go` 24 + `mymap.go` 20 + `lookup.go` 28 + `main.go` 新增 ~80）
+
+## 2026-10-19
+
+- 学到：**W2 第 1 天，起锚 8 题清账后 7/8 = 88%** —— Q1 `a=b`/`b=c` 顺序变体全对（换序 `fibo(9)` = 256）；Q4 map 改 struct（`m.Name` 变体）全对；**Q7 `chmod 600` 第 5 次终于过**（⚠️→✅）；Q2 `v, ok` 说对"ok 是判定"；清题时 **指针接收者 `(s *Student)` 自己写出来了**（昨天 Q8 只知结果不知写法）；`[]Student{}` vs `[]Student`（图纸 ≠ 盒子）当堂补回
+- 卡住：`append` 必须接住**又忘一次**（`d := append(b, 1)` 以为 `b` 会变长，实跑 `b` 还是 `len 0`）；`*Student{"小明",40,1}` 把 `*` 放错地方（报错 `cannot indirect Student{…}`）；`var b struct`（`struct` 是关键字不是类型名）；`_ = append(...)` 当成"改对"（`_` 是丢弃，不是接住）；切片字面量漏内层花括号两次（`[]Student{"小明",70,1}` 报 `cannot use "小明" ... as Student value`）
+- 明天：W2 正式开工 —— Go 语法二（接口/包/错误处理）+ 单元测试；补考欠账：`append` 接住（D+1 必考）、`[]Student{}` vs `[]Student`、`*` 只能作用在地址上；读代码第 2 篇（W2 起每周 2×45min，周二/周五）
+- 数字：commit 待提交（本条复盘）｜ 自己写的代码约 **92 行**（`LianXi/lianxi1019.go` 三组填空，最终全绿）
