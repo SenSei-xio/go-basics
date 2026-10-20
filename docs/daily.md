@@ -74,3 +74,10 @@
 - 卡住：`append` 必须接住**又忘一次**（`d := append(b, 1)` 以为 `b` 会变长，实跑 `b` 还是 `len 0`）；`*Student{"小明",40,1}` 把 `*` 放错地方（报错 `cannot indirect Student{…}`）；`var b struct`（`struct` 是关键字不是类型名）；`_ = append(...)` 当成"改对"（`_` 是丢弃，不是接住）；切片字面量漏内层花括号两次（`[]Student{"小明",70,1}` 报 `cannot use "小明" ... as Student value`）
 - 明天：W2 正式开工 —— Go 语法二（接口/包/错误处理）+ 单元测试；补考欠账：`append` 接住（D+1 必考）、`[]Student{}` vs `[]Student`、`*` 只能作用在地址上；读代码第 2 篇（W2 起每周 2×45min，周二/周五）
 - 数字：commit 待提交（本条复盘）｜ 自己写的代码约 **92 行**（`LianXi/lianxi1019.go` 三组填空，最终全绿）
+
+## 2026-10-20
+
+- 学到：**起锚 10 题 4.75/10 = 48%，清题后重答 Q1–Q6 得 4.5/6** —— Q1 `append` 不接住终于是自己答出来了（「b=[],lenb=0，因为b空了只会返回一个空盒子」）；Q3 `*` 不能给 struct 字面量加星，答「把星号删掉就行」全对；Q7 `Marshal` 不要 `&` / `Unmarshal` 要 `&` 满分（唯一把「读取/写入」和「值传递」连起来的答案）；Q9 `chmod 600` 第 3 次复考仍对；Q10 `a=b`/`b=c` 顺序第 3 次复考仍对。**切片删除「造·走·判·塞·换」五字诀练到第 2 遍闭卷全对**（`del_lianxi.go` 填 5 行全中 → `del2.go` 只给口诀闭卷 5 行全对）
+- 卡住：`del1.go` 第一次闭卷 **7 处错**（`[]Student{` 后面接了 `for` → `syntax error: unexpected keyword for, expected expression`；`for i:=0;i<len(list),i++` 逗号 → `unexpected ++, expected {`；`list[i].Id` 小写 d；`新list=list` 左右反）—— **根因是没分清「`[]Student{}` 是一个完整的词」**；`v.score` 小写（跟 10-17 `fenshu` 同一个坑）；`m[2] := v` 用 `:=` 存进已有位置 → `non-name m[2] on left side of :=`；**「stu 是函数/参数」第 3 次错**；指针接收者「给 score 前一个星」第 2 次不会写；`新list := list` 以为是造空盒子（实跑证明是复制名字，`append` 后「一个人都没删掉，反而多了一个」）
+- 明天：**按 `W2周计划.md` 走** —— 10-21 起锚 8 题 + 九九乘法表第③级复验（欠了 11 天）→ interface 入门 2h → slice 底层 2h → 岗位认知 5 条（欠 7 天）→ `del3.go` 第 3 遍闭卷限时
+- 数字：commit 1 条（本条复盘 + 3 份切片删除练习）｜ 自己写的代码约 **85 行**（`del1.go` 13 + `del_lianxi.go` 38 + `del2.go` 34）
