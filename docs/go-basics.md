@@ -402,7 +402,211 @@ VS Code 里用 `.vscode/launch.json` 的 `"cwd": "${fileDirname}"` 解决。
 
 ---
 
-## 13. 报错原文速查
+## 13. 接口（interface）
+
+### 没有接口时会怎样
+
+两种存储，各有一个 `保存` 方法：
+
+```go
+type 文件存储 struct{ 路径 string }
+type 内存存储 struct{ 容量 int }
+
+func (f 文件存储) 保存(s Student) { fmt.Println("文件存了", s.Name) }
+func (f 内存存储) 保存(s Student) { fmt.Println("内存存了", s.Name) }
+```
+
+想写一个「备份」函数让两种存储都能用，只能写两个：
+
+```go
+func 备份A(f 文件存储, s Student) { f.保存(s) }
+func 备份B(m 内存存储, s Student) { m.保存(s) }
+```
+
+**每加一种存储，就得多写一个函数。**
+
+### 加接口之后
+
+```go
+type 存储 interface {
+    保存(s Student)      // 只写「长什么样」，不写 func，不写实现
+}
+
+func 备份(s 存储, stu Student) {   // 参数类型写成接口
+    s.保存(stu)
+}
+```
+
+实跑：
+
+```
+=== 传 文件存储 ===
+【备份开始】
+文件存了 小明
+【备份结束】
+=== 传 内存存储（备份函数一个字都没改）===
+【备份开始】
+内存存了 小明
+【备份结束】
+```
+
+### 三种花括号，装三种东西（最容易混）
+
+| 写法 | 花括号里装 | 圆括号 | 要 `func` 吗 |
+|---|---|---|---|
+| `type X struct { ... }` | **数据**（字段：名字 + 类型） | ❌ 不许有 | ❌ |
+| `type X interface { ... }` | **要求**（方法签名：名字 + 圆括号） | ✅ 必须有 | ❌ 不许有 |
+| `func (r X) 方法(参数) { ... }` | **动作**（真代码） | ✅ 有 | ✅ 必须有 |
+
+写错时的真实报错：
+
+```go
+type 内存存储 struct{ 保存(s Student) }   // struct 里不许写括号
+// syntax error: unexpected name Student, expected )
+```
+
+```go
+type 文件存储 struct{ 保存(Student) }     // 能编译，但那是【字段】不是【方法】
+// 打印出来是 {{}}，调用不了
+```
+
+方法拆 4 块：
+
+```go
+func (f 文件存储) 保存(s Student) {
+// ①   ②         ③    ④
+// ① func 关键字  ② 接收者（谁的方法）  ③ 方法名  ④ 参数
+```
+
+### 隐式实现：Go 不写 implements
+
+**只要方法名 + 参数类型对得上，就算实现了接口，不用声明。**
+
+名字不对（`保存` 写成 `Save`）：
+
+```
+cannot use 硬盘{} (value of struct type 硬盘) as 存储 value in assignment:
+    硬盘 does not implement 存储 (missing method 保存)
+```
+
+参数类型不对（`保存(s Student)` 写成 `保存(s string)`）：
+
+```
+硬盘 does not implement 存储 (wrong type for method 保存)
+    have 保存(string)
+    want 保存(Student)
+```
+
+**Go 只认字面，不认意思。** 大小写、方法名、参数类型三处都极严（跟 `Id` ≠ `ID`、`score` ≠ `Score` 是同一个道理）。
+
+### 指针接收者塞不进接口
+
+```go
+func (p *手机) 保存(s Student) { ... }   // 注意是 *手机
+
+var x 存储 = 手机{}      // ❌
+// cannot use 手机{} ... 手机 does not implement 存储 (method 保存 has pointer receiver)
+
+var x 存储 = &手机{}     // ✅
+```
+
+### 一句话记住
+
+> **接口 = 一份「必须会什么」的清单。谁的方法对得上，谁就自动算数，不用报名。**
+
+---
+
+## 14. 切片底层（`len` 和 `cap`）
+
+### 切片不是数组，是三样东西
+
+| 组成 | 意思 |
+|---|---|
+| 指针 | 底层数组在哪 |
+| `len` | **现在已经用了几个** |
+| `cap` | **总共能装几个** |
+
+```go
+s := make([]int, 3, 10)
+fmt.Println(len(s), cap(s), s)   // 3 10 [0 0 0]
+```
+
+### cap 从 4 起，装满就翻倍（实跑）
+
+```go
+var s []int
+for i := 0; i < 40; i++ {
+    s = append(s, i)
+    fmt.Println("len =", len(s), "cap =", cap(s))
+}
+```
+
+| len 到 | cap |
+|---|---|
+| 1 | 4 |
+| 5 | 8 |
+| 9 | 16 |
+| 17 | 32 |
+| 33 | 64 |
+
+**不是从 1 开始 —— 第一次 append 一口气给 4 格。**
+
+### 为什么翻倍，不是每次 +1
+
+塞 1000 个元素：
+
+| 策略 | 要复制多少元素 |
+|---|---|
+| 每次 +1 格 | 1+2+3+…+999 ≈ **49 万** |
+| 每次翻倍 | 4+8+…+1024 ≈ **1000 出头**，只搬约 10 次 |
+
+**用空间浪费换搬家次数**，这叫「摊还 O(1)」。
+
+### 搬家 vs 共享（最关键）
+
+`append` 的时候看 **cap 还有没有空位**：
+
+| cap 情况 | 行为 | 后果 |
+|---|---|---|
+| 还有空位 | **原地写** | 新旧切片**共享**同一块数组 |
+| 已经装满 | **搬家**（造新数组，cap 翻倍） | 新旧切片**分开** |
+
+实跑 A —— `cap` 还有空位：
+
+```go
+a := make([]int, 2, 5)     // len=2 cap=5，还有 3 格空位
+b := append(a, 3)
+b[0] = 999
+// b = [999 2 3]   a = [999 2]      ← 改了 b，a 跟着变
+```
+
+实跑 B —— `cap` 正好装满：
+
+```go
+a := []int{1, 2}           // len=2 cap=2，没空位了
+b := append(a, 3)          // 搬家，b 的 cap 变成 4
+b[0] = 999
+// b = [999 2 3]   a = [1 2]        ← 改了 b，a 不变
+```
+
+### 判据一句话
+
+> **`append` 有空位就原地写（共享），没空位就搬家（分开）。跟是不是同一个变量、是不是 `:=` 都无关，只看 cap 够不够。**
+
+### 这条解释了 10-18 周检测那道题
+
+「切片赋值会联动，数组不会」—— 因为切片赋值只复制「指针 + len + cap」三样，**数组本体没复制**，两个切片指向同一块底层数组。
+
+```go
+s1 := []int{1, 2, 3}
+s2 := s1          // 只复制三样指针，不复制数组
+s2[0] = 999
+// s1 = [999 2 3]    两个都变
+```
+
+---
+
+## 15. 报错原文速查
 
 | 报错 | 意思 | 修法 |
 |---|---|---|
@@ -413,10 +617,22 @@ VS Code 里用 `.vscode/launch.json` 的 `"cwd": "${fileDirname}"` 解决。
 | `json: Unmarshal(non-pointer ...)` | `Unmarshal` 没给 `&` | 加 `&` |
 | `index out of range` | 下标超了 | 检查 `< len` |
 | `missing function body` | 只写了函数签名没写体 | 补 `{}` |
+| `s.保存 undefined (type 存储 has no field or method 保存)` | 接口定义里没写这个方法 | 接口花括号里补 `保存(s Student)` |
+| `X does not implement 存储 (missing method 保存)` | 方法名对不上（隐式实现只认字面） | 方法名改成接口里写的那个 |
+| `X does not implement 存储 (wrong type for method 保存)` | 方法参数类型对不上 | 参数类型跟接口里一致 |
+| `X does not implement 存储 (method 保存 has pointer receiver)` | 方法用的是指针接收者 | 传 `&X{}` 而不是 `X{}` |
+| `syntax error: unexpected name Student, expected )` | struct 花括号里写了括号（当成方法写了） | struct 里只写「名字 + 类型」，方法写到外面 |
+| `s redeclared in this block` | 名字撞了（`type s` 和 `var s`） | 换一个名字 |
+| `syntax error: unexpected keyword for, expected expression` | `[]Student{` 后面直接接了 `for` | `[]Student{}` 是一个完整的词，第二个 `}` 必须有 |
+| `syntax error: unexpected ++, expected {` | `for` 三段用了逗号 | 三段之间必须是**分号** |
+| `non-name m[2] on left side of :=` | `:=` 左边不是新变量名 | 存进已有位置用 `=` |
+| `invalid argument: list (variable of type []Student) is not a map` | 对切片用了 `delete` | 切片删除只能过滤重建 |
+| `cannot indirect Student{…} (value of struct type Student)` | 给 struct 字面量加了 `*` | `*` 只能作用在地址上 |
+| `syntax error: unexpected ], expected operand` | `[]Student` 是类型不是值 | 造盒子用 `[]Student{}` |
 
 ---
 
-## 14. 本周实际写过的文件
+## 16. 本周实际写过的文件
 
 | 文件 | 内容 |
 |---|---|
@@ -424,8 +640,11 @@ VS Code 里用 `.vscode/launch.json` 的 `"cwd": "${fileDirname}"` 解决。
 | `LianXi/slice3.go` | 切片塞 5 张卡 + `for` 遍历打印 |
 | `LianXi/mymap.go` | map 按学号存取 |
 | `LianXi/lookup.go` | map 查找 + `v, ok` + `if` 分支 + `Scanln` |
+| `LianXi/lianxi1019.go` | 三组填空：图纸vs盒子 / 值→指针接收者 / append 接住 |
+| `LianXi/iface1.go` | 接口 + 隐式实现 + 文件/内存两种存储共用同一个备份函数 |
+| `LianXi/FeiBoNaQi.go` | 斐波那契（读代码第 1 篇，40 行逐行注释在 `reading-notes.md`） |
 | `stu-manager/main.go` | 增删改查 + JSON 持久化（7 条 commit） |
 
 ---
 
-*最后更新：2026-10-18*
+*最后更新：2026-10-20*

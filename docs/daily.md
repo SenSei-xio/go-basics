@@ -78,6 +78,15 @@
 ## 2026-10-20
 
 - 学到：**起锚 10 题 4.75/10 = 48%，清题后重答 Q1–Q6 得 4.5/6** —— Q1 `append` 不接住终于是自己答出来了（「b=[],lenb=0，因为b空了只会返回一个空盒子」）；Q3 `*` 不能给 struct 字面量加星，答「把星号删掉就行」全对；Q7 `Marshal` 不要 `&` / `Unmarshal` 要 `&` 满分（唯一把「读取/写入」和「值传递」连起来的答案）；Q9 `chmod 600` 第 3 次复考仍对；Q10 `a=b`/`b=c` 顺序第 3 次复考仍对。**切片删除「造·走·判·塞·换」五字诀练到第 2 遍闭卷全对**（`del_lianxi.go` 填 5 行全中 → `del2.go` 只给口诀闭卷 5 行全对）
-- 卡住：`del1.go` 第一次闭卷 **7 处错**（`[]Student{` 后面接了 `for` → `syntax error: unexpected keyword for, expected expression`；`for i:=0;i<len(list),i++` 逗号 → `unexpected ++, expected {`；`list[i].Id` 小写 d；`新list=list` 左右反）—— **根因是没分清「`[]Student{}` 是一个完整的词」**；`v.score` 小写（跟 10-17 `fenshu` 同一个坑）；`m[2] := v` 用 `:=` 存进已有位置 → `non-name m[2] on left side of :=`；**「stu 是函数/参数」第 3 次错**；指针接收者「给 score 前一个星」第 2 次不会写；`新list := list` 以为是造空盒子（实跑证明是复制名字，`append` 后「一个人都没删掉，反而多了一个」）
-- 明天：**按 `W2周计划.md` 走** —— 10-21 起锚 8 题 + 九九乘法表第③级复验（欠了 11 天）→ interface 入门 2h → slice 底层 2h → 岗位认知 5 条（欠 7 天）→ `del3.go` 第 3 遍闭卷限时
-- 数字：commit 1 条（本条复盘 + 3 份切片删除练习）｜ 自己写的代码约 **85 行**（`del1.go` 13 + `del_lianxi.go` 38 + `del2.go` 34）
+- 卡住：`del1.go` 第一次闭卷 **7 处错**（`[]Student{` 后面接了 `for` → `syntax error: unexpected keyword for, expected expression`；`for i:=0;i<len(list),i++` 逗号 → `unexpected ++, expected {`；`list[i].Id` 小写 d；`新list=list` 左右反）—— **根因是没分清「`[]Student{}` 是一个完整的词」**（`del1.go` 原始错误版存档在 `D:\Past2\练习\del1_10-20初版7处错.go`）；`v.score` 小写（跟 10-17 `fenshu` 同一个坑）；`m[2] := v` 用 `:=` 存进已有位置 → `non-name m[2] on left side of :=`；**「stu 是函数/参数」第 3 次错**；指针接收者「给 score 前一个星」第 2 次不会写；`新list := list` 以为是造空盒子（实跑证明是复制名字，`append` 后「一个人都没删掉，反而多了一个」）
+- 明天：**按 `W2周计划.md` 走**（interface 2h + slice 底层 2h 已提前到今晚做完，明天份额往前挪）—— 10-21 起锚 10 题（含 8 条必考池）+ 九九乘法表第③级复验（欠 11 天）→ testing 表驱动测试 2h（W2 核心②）→ 岗位认知 5 条（欠 7 天）→ `del3.go` 第 3 遍闭卷限时 5–10min
+- 数字：commit 1 条｜ 自己写的代码约 **85 行**（三份切片删除练习）
+- 注：10-20 22:48 起练习文件改放 `D:\Past2\练习\`（不进 git）；`LianXi/` 只放「要传到 GitHub 的成型练习」。详见 `protocol.md` §10.10
+
+- 补记（22:00–22:43，W2 核心① interface + 核心② slice 底层）：
+  - **interface 2h**：从「没有接口时备份函数得写两个」开始，到「接口 = 一份必须会什么的清单」，最后写 `LianXi/iface1.go` —— 三题（接口签名 / 文件存储方法 / 内存存储方法）**一次全对**。实跑「传 文件存储」和「传 内存存储」都能用同一个 `备份` 函数，一个字没改。
+  - **暴露的乱**：第一次交上来的代码 4 个错 —— `type 文件存储 struct{ 保存(Student) }`（能编译但那是**字段**不是方法）、`struct{ 保存(s Student) }` → `syntax error: unexpected name Student, expected )`、接口名 `s` 跟变量 `s` 撞车 → `s redeclared in this block`、`内存存储` 完全没写方法。**根因是没分清三种花括号各装什么**（struct 装数据 / interface 装要求 / func 装动作）。
+  - **隐式实现验证题答错**：问「方法叫 `Save` 不叫 `保存` 能不能塞进接口」，答「能，Go 会自动认」→ 实跑 `硬盘 does not implement 存储 (missing method 保存)`。讲透「Go 只认字面不认意思」。
+  - **slice 底层 2h**：cap 实跑 `4 → 8 → 16 → 32 → 64`（**我第一次给的 1→2→4→8 是凭记忆编的，错了，已当面认错纠正**）。用户观察到「cap 呈指数上涨但卡在 8 了」，是被我错误输出误导。讲清「slice = 指针 + len + cap 三样」、「翻倍是用空间浪费换搬家次数（不翻倍塞 1000 个要复制 49 万次，翻倍只约 1000 次）」、「append 有空位就共享、没空位就搬家」。
+  - **验收 2 题第一遍全错**：Q1 `make([]int,2,5)` 后 append → 答「不会互相影响」，实际 `a[0] = 999`（cap 有空位，共享）；Q2 `[]int{1,2}`（cap 满）后 append → 答「也不会」，实际**确实不会**（这次蒙对了结论）但理由是 cap 满了搬家。第二遍复述「append 没位置才会搬家」✅ 完全正确。
+  - **数字**：commit 待提交｜今天自己写的代码约 **150 行**（切片删除三份 85 行 + interface 练习 60 行 + 填空 5 行）
