@@ -90,3 +90,33 @@
   - **slice 底层 2h**：cap 实跑 `4 → 8 → 16 → 32 → 64`（**我第一次给的 1→2→4→8 是凭记忆编的，错了，已当面认错纠正**）。用户观察到「cap 呈指数上涨但卡在 8 了」，是被我错误输出误导。讲清「slice = 指针 + len + cap 三样」、「翻倍是用空间浪费换搬家次数（不翻倍塞 1000 个要复制 49 万次，翻倍只约 1000 次）」、「append 有空位就共享、没空位就搬家」。
   - **验收 2 题第一遍全错**：Q1 `make([]int,2,5)` 后 append → 答「不会互相影响」，实际 `a[0] = 999`（cap 有空位，共享）；Q2 `[]int{1,2}`（cap 满）后 append → 答「也不会」，实际**确实不会**（这次蒙对了结论）但理由是 cap 满了搬家。第二遍复述「append 没位置才会搬家」✅ 完全正确。
   - **数字**：commit 待提交｜今天自己写的代码约 **150 行**（切片删除三份 85 行 + interface 练习 60 行 + 填空 5 行）
+
+## 2026-10-21（周三 · W2 第 3 天）
+
+### 学到
+- **testing 入门**：测试文件三规矩（`_test.go` / `Test` 开头 / `t *testing.T`）、最小骨架 5 行（`got` / `want` / `if got != want` / `t.Errorf`）、`go test -v` / `-cover`。
+- **表驱动测试**：`cases := []struct{...}{...}` + `for _, c := range cases`，把「写四遍」变成「写一遍跑四次」。
+- **`for ... range` 彻底讲透**：三段式 `for i := 0; i < len(x); i++` 与 `for i, v := range x` 完全等价；`for v := range x` 拿到的是**下标**不是值；只要值必须 `for _, v := range x`。
+- **`t.Fatal` vs `t.Errorf`**：Fatal 立刻停（后面一行不跑），Errorf 记账继续（表驱动必须用它）。
+- **`go run` 不跑 Test，`go test` 不跑 main** —— 所以 main 里的 `Scanln` / `Println` 让测试无法进行。
+- **重构**：把 `stu-manager/main.go` 里的查找/删除/修改拆成 `funcs.go` 三个函数，`main` 只负责输入输出。跑 `go build ./...` / `go vet ./...` 全干净，功能实跑没变。
+
+### 卡住
+- **`t.Fatal` 忘了删**：练习第 2 题 cases 表和 for 循环全写对了，但函数第一行还留着 `t.Fatal("第 2 题还没写")`，后面一行都没跑到 → `--- FAIL: 第 2 题还没写`。
+- **`=` 和 `:=` 选错**：`ok2, list = 修改(...)` → `.\main.go:82:2: undefined: ok2`。`ok2` 第一次出现必须用 `:=`；`:=` 左边只要有一个新变量就合法（`ok2` 新、`list` 老也行）。
+- **参数之间写成句号**：`func 修改(m map[int]Student,list []Student,id int.新成绩 int)` → `syntax error: unexpected name int in parameter list; possibly missing comma or )`。
+- **旧代码忘记删**：重构时 `main.go` 里原来手写的删除段（71-77 行）和修改段（91-100 行）没删，被新函数调用又做了一遍。
+- **花括号套错**：把「打印全部 + 保存 students.json」包进了 `if ok2` 里面，导致「修改的学号不存在」时**不保存数据**。已改成 if 只包成功/失败两行。
+- **`for ... range` 一开始完全没懂**：用户原话「我大概清楚是用 if 判定，但是 for 的遍历我更是一点没看懂」。用「先手动写三遍 `和 = 和 + 分数[0/1/2]` → 看出只有下标在变 → 合成一行」讲通。
+
+### 明天（10-22）
+- 先补 `stu-manager` 的 `Test删除` 表驱动测试（今天剩的最后 10 分钟）
+- W2 核心：map 底层（哈希/冲突/扩容/nil map panic）+ interface 深化（多态/any/类型断言）
+- 补 `students.json` 累加 bug（连跑两次 2→5→8 人）
+- 欠账：岗位认知 5 条（拖 8 天）、`del3.go` 第 3 遍
+
+### 数字
+- 起锚 10 题 **4.2/10 = 42%**，清题后 5 道全通
+- `D:\Past2\练习\testing_1021\` 覆盖率 **77.8%**（`及格` 100% / `平均分` 100% / `main` 0%）
+- 今天自己写的代码：`funcs.go` 约 40 行 + `练习_test.go` 约 35 行 + `funcs_test.go` 骨架 30 行 ≈ **105 行**
+- commit：`go-basics` 1 条 `docs: 新增 testing 测试一节（§15）+ 10-21 复盘`；`stu-manager` 2 条 `feat: 拆分可测函数（查找/删除/修改）+ go.mod`、`test: Test删除 表驱动测试骨架（4 用例，暂 Skip）` —— 待用户手动 Push

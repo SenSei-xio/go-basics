@@ -606,7 +606,141 @@ s2[0] = 999
 
 ---
 
-## 15. 报错原文速查
+## 15. testing 测试
+
+### 15.1 测试文件三规矩
+
+| 规矩 | 说明 |
+|---|---|
+| 文件名 `xxx_test.go` | `go test` 只认这个后缀 |
+| 函数名 `TestXxx` | 必须大写 T 开头 |
+| 参数 `t *testing.T` | `go test` 自动传进来 |
+
+**同目录、同包**（`funcs.go` 是 `package main` → `funcs_test.go` 也 `package main`）。
+
+### 15.2 最小骨架
+
+```go
+func Test平均分(t *testing.T) {
+	got := 平均分([]int{70, 90, 40})
+	want := 66
+	if got != want {
+		t.Errorf("平均分 = %d, 想要 %d", got, want)
+	}
+}
+```
+
+`got` / `want` 是惯例名字。`t.Errorf` 失败时自动带「文件名:行号」。
+
+### 15.3 `t.Errorf` vs `t.Fatal`
+
+| | 干什么 | 后面代码 |
+|---|---|---|
+| `t.Fatal` | 立刻失败 | **一行都不执行** |
+| `t.Errorf` | 记一笔，继续 | **照样执行** |
+
+**表驱动必须用 `t.Errorf`** —— 用 `Fatal` 第一个用例失败后面就全不测了。
+
+实跑对照：
+
+```
+=== RUN   Test用Fatal
+    a_test.go:6: 第一行就 Fatal
+--- FAIL: Test用Fatal (0.00s)
+=== RUN   Test用Errorf
+    a_test.go:11: 第一行 Errorf，但继续跑
+    a_test.go:12: 这行照样执行
+--- FAIL: Test用Errorf (0.00s)
+```
+
+### 15.4 表驱动测试
+
+```go
+func Test平均分_表驱动(t *testing.T) {
+	cases := []struct {
+		名字 string
+		输入 []int
+		想要 int
+	}{
+		{"三个数", []int{70, 90, 40}, 66},
+		{"一个数", []int{88}, 88},
+		{"空切片", []int{}, 0},
+		{"全零", []int{0, 0}, 0},
+	}
+
+	for _, c := range cases {
+		got := 平均分(c.输入)
+		if got != c.想要 {
+			t.Errorf("%s：平均分(%v) = %d, 想要 %d", c.名字, c.输入, got, c.想要)
+		}
+	}
+}
+```
+
+**三段：定义卡型 → 填数据 → `for range` 遍历。**
+和 `type Student struct{}` + `[]Student{{...},{...}}` + `for` 遍历是同一套。
+
+### 15.5 `for ... range` 遍历
+
+```go
+分数 := []int{70, 90, 40}
+
+// 三段式
+for i := 0; i < len(分数); i++ {
+	fmt.Println(分数[i])
+}
+
+// range（等价）
+for i, v := range 分数 {
+	fmt.Println(i, v)
+}
+```
+
+| 写法 | 拿到什么 |
+|---|---|
+| `for i, v := range 分数` | 下标 + 值 |
+| `for i := range 分数` | **只有下标** |
+| `for _, v := range 分数` | **只有值**（必须用 `_` 丢下标） |
+
+> ⚠️ `for v := range 分数` 拿到的是**下标**，不是值。
+
+### 15.6 覆盖率
+
+```
+go test -cover ./...                 # 总覆盖率
+go test -coverprofile=c.out ./...    # 存明细
+go tool cover -func=c.out            # 每个函数多少
+```
+
+实跑结果：
+
+```
+lianxi/s.go:6:   及格     100.0%
+lianxi/s.go:11:  平均分   100.0%
+lianxi/s.go:22:  main     0.0%
+total:            77.8%
+```
+
+**`main` 永远是 0%** —— `go test` 不执行 main。
+
+### 15.7 为什么要把逻辑拆出 `main`
+
+`go run` 不执行 Test 函数，`go test` 不执行 main 函数。`main` 里的 `fmt.Scanln` 会让测试卡死、`fmt.Println` 结果拿不到。
+
+**所以 `main` 只放「输入 → 调函数 → 输出」，逻辑搬进独立函数。**
+
+`stu-manager` 拆出来的三个（`funcs.go`）：
+
+```go
+func 查找(m map[int]Student, want int) (Student, bool)
+func 删除(list []Student, del int) []Student
+func 修改(m map[int]Student, list []Student, id int, 新成绩 int) (bool, []Student)
+```
+
+---
+
+
+## 16. 报错原文速查
 
 | 报错 | 意思 | 修法 |
 |---|---|---|
@@ -629,10 +763,15 @@ s2[0] = 999
 | `invalid argument: list (variable of type []Student) is not a map` | 对切片用了 `delete` | 切片删除只能过滤重建 |
 | `cannot indirect Student{…} (value of struct type Student)` | 给 struct 字面量加了 `*` | `*` 只能作用在地址上 |
 | `syntax error: unexpected ], expected operand` | `[]Student` 是类型不是值 | 造盒子用 `[]Student{}` |
+| `undefined: ok2` | `ok2` 从没声明过却用了 `=` | 第一次出现的变量用 `:=` |
+| `no new variables on left side of :=`（又一例） | `:=` 左边全是老变量 | 换成 `=`，或加一个新名字 |
+| `syntax error: unexpected name int in parameter list` | 参数之间写了句号 `int.新成绩` | 参数之间全部用逗号 |
+| `--- FAIL: TestXxx` + `第 X 题还没写` | 忘了删 `t.Fatal` | 删掉骨架里的 `t.Fatal` 那行 |
+| `pattern ./...: directory prefix . does not contain main module` | 目录里没有 `go.mod` | 在该目录 `go mod init 名字` |
 
 ---
 
-## 16. 本周实际写过的文件
+## 17. 本周实际写过的文件
 
 | 文件 | 内容 |
 |---|---|
@@ -644,7 +783,10 @@ s2[0] = 999
 | `LianXi/iface1.go` | 接口 + 隐式实现 + 文件/内存两种存储共用同一个备份函数 |
 | `LianXi/FeiBoNaQi.go` | 斐波那契（读代码第 1 篇，40 行逐行注释在 `reading-notes.md`） |
 | `stu-manager/main.go` | 增删改查 + JSON 持久化（7 条 commit） |
+| `stu-manager/funcs.go` | 从 main 拆出的三个可测函数：`查找` / `删除` / `修改`（10-21） |
+| `stu-manager/funcs_test.go` | 第一个项目内测试文件：`删除` 的表驱动测试（10-21，待完成） |
+| `Past2/练习/testing_1021/`（非仓库） | testing 练习场：`及格` / `平均分` + 普通测试 + 表驱动测试（覆盖率 77.8%） |
 
 ---
 
-*最后更新：2026-10-20*
+*最后更新：2026-10-21*
