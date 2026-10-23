@@ -1,4 +1,4 @@
-# Go 语法笔记（W1 · 2026-10-12 ~ 2026-10-18）
+# Go 语法笔记（W1–W2 · 2026-10-12 ~ 2026-10-25）
 
 > 这份笔记按「我实际写过、跑通过的」整理，不是抄文档。
 > 每条都附可运行的代码；凡是标了「实跑输出」的，都是真的跑过。
@@ -740,7 +740,156 @@ func 修改(m map[int]Student, list []Student, id int, 新成绩 int) (bool, []S
 ---
 
 
-## 16. 报错原文速查
+## 16. map 底层（10-23）
+
+### 16.1 存进去之后，它怎么找到的
+
+```
+m[2] = "小明"
+  ↓
+① 算哈希：把 2 变成一个数字，比如 38
+  ↓
+② 定桶：38 % 8 = 6  →  放进 6 号桶
+  ↓
+③ 桶里存：{键 2, 值 "小明"}
+```
+
+Go 的 map 内部有 **8 个桶（bucket）**，每个桶有 **8 个槽**。取的时候同样三步：算哈希 → 定位桶 → 在桶里找键。
+
+### 16.2 为什么遍历顺序每次都不一样
+
+Go 每次遍历前会**随机挑一个起始桶**，然后绕 8 个桶走一圈。同一个 map 连跑三次，输出顺序可以全不同。
+
+**这不是 bug，是设计**：故意打乱，防止你写出「依赖遍历顺序」的代码。要顺序，就自己排序（见 16.4）。
+
+### 16.3 为什么 `m[2].Score = 100` 不让写（唯一真原因）
+
+**不是**「桶里没有顺序」，**是元素的位置会变**。
+
+- map 扩容时，所有元素要**重新算哈希、搬到新桶**，位置全变
+- 如果允许 `&m[2]`，你拿到的地址过一会儿就失效了 → 变成**野指针**
+- 所以 Go 干脆不让 map 元素可取地址
+
+实跑报错：
+
+```
+m[2].Score = 100   → cannot assign to struct field m[2].Score in map
+fmt.Println(&m[2]) → cannot take address of m[2] (map index expression of struct type Student)
+```
+
+对照：**切片可以** `list[0].Score = 100`、`&list[0]` 都能跑，因为切片是货架，格子位置固定。
+
+### 16.4 扩容规则
+
+- 一开始 **1 个桶**，每个桶 8 个槽
+- 装到 **「桶数 × 6.5」** 个元素时触发扩容（负载因子 6.5）
+- 扩容时**桶数翻倍**，**所有元素重新哈希**
+
+### 16.5 map 排序输出（三步）
+
+```go
+keys := []int{}                       // ① 造一个只装键的空切片
+for k := range m {
+	keys = append(keys, k)            // ② 把所有键捞出来（接住！）
+}
+sort.Ints(keys)                       // ③ 排序（要 import "sort"）
+
+for _, k := range keys {
+	fmt.Println(k, m[k])              // 按排好的键一个个取
+}
+```
+
+### 16.6 map 的几条铁律
+
+| 问题 | 答案 |
+|---|---|
+| map 有 `cap` 吗 | **没有**，`cap(m)` 编译报错，只有 `len` |
+| 边遍历边删 | **允许** |
+| 删不存在的键 | 不崩，静默跳过 |
+| nil map 读 | 返回零值，不崩 |
+| nil map 写 | **panic: assignment to entry in nil map** |
+| 能对 map 元素取地址吗 | **不能**（见 16.3） |
+
+---
+
+## 17. 接口深化（10-23）
+
+### 17.1 `any` 是什么
+
+`any` 就是 `interface{}` 的别名，**能装任何东西**：
+
+```go
+var x any = 100          // 装整数
+var y any = "hello"      // 装字符串
+var z any = Student{}    // 装 struct
+```
+
+**代价：装进去就忘了它是什么。**
+
+```go
+var x any = 100
+y := x + 1    // invalid operation: x + 1 (mismatched types any and untyped int)
+```
+
+编译器只知道「x 是个 any」，不知道里面是 int，所以不敢做加法。
+
+### 17.2 类型断言：把东西取回来用
+
+```go
+var x any = 100
+
+n, ok := x.(int)      // 意思是"我认为 x 里面是 int，帮我取出来"
+fmt.Println(n, ok)    // 100 true
+
+s, ok2 := x.(string)  // 猜错了
+fmt.Println(s, ok2)   // "" false   ← 不 panic，只是 ok 是 false
+```
+
+**不加 ok 直接断言，猜错就 panic**：
+
+```go
+x.(string)   // panic: interface conversion: interface {} is int, not string
+```
+
+**所以永远写 `n, ok := x.(类型)` 这个两步形式。**
+
+### 17.3 `%T` 和断言的三个坑
+
+| 写法 | 结果 |
+|---|---|
+| `fmt.Printf("%T", x)` | ✅ 打印 x 的类型名 |
+| `x.("%T")` | ❌ `syntax error: unexpected literal "%T", expected type` |
+| `x.(abc)` | ❌ `undefined: abc` |
+
+- `%T` **只能出现在 `Printf`/`Sprintf` 的格式字符串里**
+- `x.(...)` 括号里**只能写类型名**（`int`、`string`、`Student`），不能写字符串字面量、不能写变量
+
+### 17.4 多态：一个函数收所有「会这个方法」的东西
+
+```go
+type 形状 interface {
+	面积() float64
+}
+
+type 矩形 struct{ 宽, 高 float64 }
+func (r 矩形) 面积() float64 { return r.宽 * r.高 }
+
+type 圆 struct{ 半径 float64 }
+func (c 圆) 面积() float64 { return 3.14159 * c.半径 * c.半径 }
+
+func 报告(s 形状) {
+	fmt.Println("面积是", s.面积())
+}
+
+报告(矩形{3, 4})   // 面积是 12
+报告(圆{1})        // 面积是 3.141592653589793
+```
+
+**`报告` 这个函数只写了一次，却能收矩形和圆** —— 因为它只依赖「有 `面积()` 这个方法」这个约定。
+
+---
+
+## 18. 报错原文速查
 
 | 报错 | 意思 | 修法 |
 |---|---|---|
@@ -768,10 +917,18 @@ func 修改(m map[int]Student, list []Student, id int, 新成绩 int) (bool, []S
 | `syntax error: unexpected name int in parameter list` | 参数之间写了句号 `int.新成绩` | 参数之间全部用逗号 |
 | `--- FAIL: TestXxx` + `第 X 题还没写` | 忘了删 `t.Fatal` | 删掉骨架里的 `t.Fatal` 那行 |
 | `pattern ./...: directory prefix . does not contain main module` | 目录里没有 `go.mod` | 在该目录 `go mod init 名字` |
+| `panic: assignment to entry in nil map` | nil map 直接写 | 先 `make(map[...]...)` |
+| `invalid operation: x + 1 (mismatched types any and untyped int)` | any 装进去就忘了类型 | 先类型断言 `n, ok := x.(int)` |
+| `syntax error: unexpected literal "%T", expected type` | `x.("%T")` 括号里写了字符串 | `%T` 只能放 `Printf` 里，断言括号里只写类型名 |
+| `panic: interface conversion: interface {} is int, not string` | 断言猜错且没写 ok | 永远用 `n, ok := x.(类型)` |
+| `expected ')', found ','` | 括号不配对（多写了一个左括号） | 数一数 `(` 和 `)` 是不是一样多 |
+| `format %d has arg ok of wrong type bool` | `%d` 接了 `bool` | bool 用 `%v`，数字才用 `%d` |
+| `go: cannot run *_test.go files` | 用 `go run` 跑测试文件 | 测试只能用 `go test` |
+| `assignment mismatch: 1 variable but 删除 returns 2 values` | 变量个数和返回值个数不一致 | 先念 `func` 那一行有几个返回值 |
 
 ---
 
-## 17. 本周实际写过的文件
+## 19. 本周实际写过的文件
 
 | 文件 | 内容 |
 |---|---|
@@ -784,9 +941,10 @@ func 修改(m map[int]Student, list []Student, id int, 新成绩 int) (bool, []S
 | `LianXi/FeiBoNaQi.go` | 斐波那契（读代码第 1 篇，40 行逐行注释在 `reading-notes.md`） |
 | `stu-manager/main.go` | 增删改查 + JSON 持久化（7 条 commit） |
 | `stu-manager/funcs.go` | 从 main 拆出的三个可测函数：`查找` / `删除` / `修改`（10-21） |
-| `stu-manager/funcs_test.go` | 第一个项目内测试文件：`删除` 的表驱动测试（10-21，待完成） |
+| `stu-manager/funcs_test.go` | 第一个项目内测试文件：`删除`(4 用例) / `查找`(3 用例) / `修改`(3 用例) 三张表驱动测试，全 PASS，覆盖率 11.3%（10-23） |
 | `Past2/练习/testing_1021/`（非仓库） | testing 练习场：`及格` / `平均分` + 普通测试 + 表驱动测试（覆盖率 77.8%） |
+| `Past2/练习/1023/`（非仓库） | map/interface 手打练习：A nil map / B v,ok+delete / C map 排序 / D 接口+any+类型断言，各打 2–3 遍 |
 
 ---
 
-*最后更新：2026-10-21*
+*最后更新：2026-10-23*
