@@ -156,6 +156,41 @@
 - 时间：17:14 开工 → 23:50+ 收工
 
 
+
+## 10-24（周六 · W2 第 6 天）
+
+**学到**
+- **起锚 5.3/10 = 53%**（比 10-23 的 31% 回升 22pp）。唯一满分题：`range` 三种写法 + 主动指出 `for v := range` 最易踩坑
+- **重构：从 main 里剥逻辑成函数**（用户 10-23 主动要求先复习）——三遍全过：第 1 遍 ≈35min（带修）、第 2 遍 ≈6min、第 3 遍 **≈5min 一字不差**，三遍 `go run` 都是 `平均分是： 66`
+- 核心口诀：**「`fmt.` 开头的一律留在 main，剩下的才考虑搬」**；配套声明（`var del int` 只服务 `fmt.Scanln`）也跟着留
+- 参数/返回值判定法：看变量第一次出现在哪 —— `x := 0` / `var x int` 是函数自己造的（不进参数）；函数里用了但函数里没造过 → 外面造的（必须传进来）；函数里改过且要让外面看到 → 必须走返回值
+- **拆包（接口分层）第 1–3 步全部完成并提交**：`model/model.go`（`Student` 迁出）+ `store/store.go`（`Storage` 接口 + `FileStore` 的 `Load`/`Save`）
+- **Go 导出规则讲透**：首字母必须大写英文字母才导出；汉字没有大小写 → 汉字开头的类型/函数/字段/方法永远导不出去。跨包要用的：`Student`/`Name`/`Score`/`ID`/`Storage`/`FileStore`/`Load`/`Save`/`Path`
+- **`store` 的 33 行逐行讲了两遍**（用户原话「这三十三行代码我几乎全不认识」），再让他闭卷重打
+
+**卡住**
+- **字段类型填成「一个 json 方法」**：问 `FileStore` 里装什么，答「一个 json 的方法，可以把东西转换成 json 格式的方法」→ 把 `json.Marshal` 当成字段类型。真实报错 `json.Marshal (value of type func(v any) ([]byte, error)) is not a type`。**struct 花括号里只能填类型，函数/方法填不进去**
+- **`if err == nil` 写反**（致命但编译能过）：存档里有 2 人，实跑读回 `len=0 err=<nil>` → 程序不报错、数据没了。改成 `if err != nil` 后 `len=2`
+- **`Save` 签名写成 Load 的样子**：`func (f FileStore) Save() ([]model.Student, error)` → 三连报 `undefined: list` + `not enough return values`（×2）。正解 `Save(list []model.Student) error`（1 进 1 出）
+- **`err = json, json.Unmarshal(...)` 多一个逗号** → `use of package json not in selector`
+- **`path` 小写**（第 7 个拼写类错误，前六个：`fenshu`/`score`/`Id`/`Save`/`mian`/`Scote`）→ `unknown field Path ... but does have unexported path`
+- **「四个函数我总乱」**：用户原话「os.ReadFile, json.Unmarshal, json.Marshal, os.WriteFile，哪怕有选择我也总是乱」→ 换讲法：不是四选一，是**一条流水线上的四个站点**；`Un` = 拆包（要 `&`），不带 = 打包（不要 `&`）；「变出字节」的两个还 2 个值、「只搬运」的两个还 1 个值
+- **用户自评**：「写完了你看看，虽然还是看了几眼，看了 data 那一行和 if 那一行，out 和 if 那一行的写法，剩下的都还好」→ 闭卷重打 `store.go` 与提交版 **diff 只有 1 个空行差异**，实质零错误
+
+**明天**
+- 拆包第 4 步：`main.go` 改成只依赖 `store.Storage`（删掉老读写 20 行）——这是 10-25 核心① 的主体
+- 拆包第 5 步：`go vet` 23 条 unkeyed fields 修正 + `gofmt -w .` 统一换行
+- 修累加 bug + 平均分/排名（10-23、10-24 连续两天顺延）
+- 覆盖率从 11.3% 提到 60%（拆包本身不解决，需抽 IO 层）
+- 周检测：口述 slice 扩容 + interface 多态
+
+**数字**
+- 起锚 **5.3/10 = 53%**
+- 重构练习 **3 遍**（35min → 6min → 5min）
+- 拆包 **5 步走了 3 步（50%）**，用时 ≈85min / 计划 150min
+- commit **1 条**：`db8a418 feat: 拆出 model 包与 store 包（Student 迁到 model，新增 Storage 接口 + FileStore 实现）`（5 files, +70 −29）
+- 时间：19:16 开工 → 00:20 收工
+
 ---
 
-*最后更新：2026-10-23*
+*最后更新：2026-10-25*
