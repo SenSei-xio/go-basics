@@ -889,7 +889,192 @@ func 报告(s 形状) {
 
 ---
 
-## 18. 报错原文速查
+
+## 18. 包与拆包（10-24）
+
+> 这一节是 10-24 晚上拆 `stu-manager` 时踩出来的。**「包」是 W1 顺延到 W2 的最后一块语法，也是 W2 任务③「接口分层重构」的地基。**
+
+### 18.1 为什么必须拆包
+
+拆包之前，`stu-manager` 里的 `main.go` 有 99 行，全是「打印提示 → 等键盘 → 打印结果」。问题有三个：
+
+1. **测试测不到**：`go test` 不执行 `main`，`fmt.Scanln` 还会让测试卡死
+2. **换存储要动全身**：读写存档的代码和界面代码混在一起
+3. **名字全挤在一个包**：`Student`、三个函数、读写逻辑，谁都能碰谁
+
+拆完的目标结构：
+
+```
+stu-manager/
+├── main.go          只管界面：打印提示、读键盘、显示结果
+├── funcs.go         业务逻辑：查找 / 删除 / 修改
+├── funcs_test.go    测试
+├── model/
+│   └── model.go     package model —— 只放 Student 这个数据类型
+└── store/
+    └── store.go     package store —— 只放「怎么存、怎么取」
+```
+
+### 18.2 一个文件夹只能有一个包
+
+```go
+// 如果在同一个文件夹里放 a.go 和 b.go，一个写 package main、一个写 package model
+found packages main (a.go) and model (b.go) in C:\Users\...\pk1
+```
+
+**要分两个包，就必须建两个文件夹。** 这是 Go 的硬规则，不是风格建议。
+
+### 18.3 import 路径怎么拼
+
+公式：**`go.mod` 里的 module 名 + 子目录名**
+
+```go
+// go.mod 第一行是 module stu-manager
+import "stu-manager/model"   // ✅
+import "stu-manager/store"   // ✅
+import "./model"             // ❌
+```
+
+写成相对路径的真实报错：
+
+```
+main.go:5:2: "./model" is relative, but relative import paths are not supported in module mode
+local import "./model" in non-local package
+```
+
+### 18.4 Go 导出规则：首字母大写才导出（汉字永远导不出）
+
+这是拆包时最容易翻车的一条。规则只有一句：
+
+> **名字的第一个字符是「大写英文字母」→ 其他包能用；否则 → 只有自己这个包能用。**
+
+| 名字 | 能跨包用吗 | 原因 |
+|---|---|---|
+| `Student` / `FileStore` / `Storage` | ✅ | 首字母大写英文 |
+| `Load` / `Save` | ✅ | 首字母大写英文 |
+| `Name` / `Score` / `ID` / `Path` | ✅ | 首字母大写英文 |
+| `save` / `path` | ❌ | 小写 |
+| `保存` / `查找` / `删除` / `修改` | ❌ | **汉字没有大小写 → 永远导不出去** |
+
+真实报错（跨包调小写方法）：
+
+```
+.\main.go:7:4: s.保存 undefined (cannot refer to unexported method 保存)
+.\main2.go:10:5: st.save undefined (cannot refer to unexported method save)
+```
+
+汉字包名也不行：
+
+```
+malformed import path "baodemo/甲": invalid char '甲'
+```
+
+**实践推论**：
+- 留在 `main` 包里的 `查找`/`删除`/`修改` **不用改名**（同一个包内随便叫）
+- 一旦搬进 `model/` 或 `store/`，就必须是英文大写：`Student`/`Storage`/`FileStore`/`Load`/`Save`/`Path`
+- 局部变量（`list`/`s`/`st`/`新list`）不跨包，随便叫
+
+### 18.5 `Storage` 接口 + `FileStore` 实现
+
+```go
+package store
+
+import (
+	"encoding/json"
+	"os"
+	"stu-manager/model"
+)
+
+// 接口：一份清单，写着「想当我，必须会这几个方法」
+type Storage interface {
+	Load() ([]model.Student, error)
+	Save(list []model.Student) error
+}
+
+// 具体实现：真的去读写硬盘上的 JSON 文件
+type FileStore struct {
+	Path string
+}
+
+func (f FileStore) Load() ([]model.Student, error) {
+	data, err := os.ReadFile(f.Path)
+	if err != nil {
+		return []model.Student{}, err
+	}
+	var list []model.Student
+	err = json.Unmarshal(data, &list)
+	return list, err
+}
+
+func (f FileStore) Save(list []model.Student) error {
+	out, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(f.Path, out, 0644)
+}
+```
+
+**四个设计要点**
+
+1. **`Path` 必须大写**，否则 `main` 里 `store.FileStore{Path: "students.json"}` 会报 `unknown field Path in struct literal of type store.FileStore, but does have unexported path`
+2. **`Load` 里用 `f.Path` 不用写死字符串**，否则换个存档路径就失效
+3. **`if err != nil`（不是 `== nil`）** —— 写反了编译能过，但会「永远读回 0 人」：文件正常 `err` 是 `nil`，`err == nil` 为 true 就提前 return 空切片了。**这是本项目最隐蔽的一个 bug**
+4. **错误要 `return` 出去，不要在存储层 `Println`** —— 存储层的职责只有「读到给数据 / 读不到给错误」，怎么告诉用户是 `main` 的事
+
+### 18.6 读写存档四函数流水线（本节最重要的一张图）
+
+初学者最容易把 `os.ReadFile` / `json.Unmarshal` / `json.Marshal` / `os.WriteFile` 记成一团。它们其实是一条流水线上的四个站点：
+
+```
+读：硬盘 --①os.ReadFile--> 字节 --②json.Unmarshal(&list)--> 名单
+写：名单 --③json.Marshal--> 字节 --④os.WriteFile--> 硬盘
+```
+
+| 站点 | 干什么 | 参数 | 返回几个值 |
+|---|---|---|---|
+| ① `os.ReadFile(路径)` | 硬盘 → 字节 | 路径 | 2 个：`data []byte`, `err error` |
+| ② `json.Unmarshal(字节, &名单)` | 字节 → 名单 | **要 `&`** | **1 个**：只有 `err` |
+| ③ `json.Marshal(名单)` | 名单 → 字节 | 名单 | 2 个：`data []byte`, `err error` |
+| ④ `os.WriteFile(路径, 字节, 0644)` | 字节 → 硬盘 | 路径、字节、权限 | **1 个**：只有 `err` |
+
+**三条记法**
+- **`Un` = 拆包（要 `&`），不带 `Un` = 打包（不要 `&`）**
+- **"变出字节"的两个（ReadFile / Marshal）还 2 个值；"只搬运"的两个（Unmarshal / WriteFile）还 1 个值**
+- `json.Unmarshal` 写成两个变量接 → `assignment mismatch: 2 variables but json.Unmarshal returns 1 value`
+
+真实类型（实跑 `%T`）：`data` 是 `[]uint8`（就是 `[]byte`）、`list` 是 `[]main.Student`、`out` 是 `[]uint8`
+
+**`0644` 是八进制**：`0644` = 420 十进制（八进制 6 = 二进制 110 = 读+写）。写成 `644` 会变成十进制 644，虽然不报错但语义错
+
+### 18.7 函数签名里的括号位置
+
+拆包时最容易懵的一点：**哪些括号是参数、哪个是返回值**
+
+```go
+func 甲() ([]model.Student, error)              // 第一个括号空 = 不要参数；第二个括号 = 返回 2 个
+func 乙(list []model.Student) error             // 第一个括号有名字+类型 = 1 个参数；括号外 error = 返回 1 个
+func 丙() (error)                               // 1 个返回值时括号可加可不加（实测都行）
+func 丁(list []model.Student) ([]model.Student, error)  // 1 进 2 出
+```
+
+- **第一个括号 = 参数**（要进来什么）
+- **第一个括号后面的那一坨 = 返回值**（要交出去什么）
+- 返回值 **2 个以上必须加括号**；1 个可以加也可以不加
+- 函数声明了几个返回值，**每个 `return` 就必须凑够几个**：`not enough return values have (error) want ([]model.Student, error)`
+
+### 18.8 拆包踩过的 6 个真实报错
+
+| 报错原文 | 病因 |
+|---|---|
+| `found packages main (a.go) and model (b.go) in ...` | 同一文件夹写了两个包名 |
+| `"./model" is relative, but relative import paths are not supported in module mode` | import 写成相对路径 |
+| `package stu-manager/mode1 is not in std` | `model` 打成了 `mode1`（数字 1） |
+| `cannot refer to unexported method 保存` / `save` | 跨包的方法名首字母没大写 |
+| `malformed import path "baodemo/甲": invalid char '甲'` | 汉字包名 |
+| `json.Marshal (value of type func(v any) ([]byte, error)) is not a type` | 把函数当成字段类型写进 struct |
+
+## 19. 报错原文速查
 
 | 报错 | 意思 | 修法 |
 |---|---|---|
@@ -925,10 +1110,15 @@ func 报告(s 形状) {
 | `format %d has arg ok of wrong type bool` | `%d` 接了 `bool` | bool 用 `%v`，数字才用 `%d` |
 | `go: cannot run *_test.go files` | 用 `go run` 跑测试文件 | 测试只能用 `go test` |
 | `assignment mismatch: 1 variable but 删除 returns 2 values` | 变量个数和返回值个数不一致 | 先念 `func` 那一行有几个返回值 |
+| `found packages main (a.go) and model (b.go) in ...` | 同一文件夹写了两个包名 | 建子文件夹，一个文件夹一个包 |
+| `"./model" is relative, but relative import paths are not supported in module mode` | import 写成相对路径 | 用 `module名/子目录`，如 `stu-manager/model` |
+| `package stu-manager/mode1 is not in std` | `model` 打成 `mode1`（数字 1） | 改回字母 l |
+| `cannot refer to unexported method 保存` / `save` | 跨包的方法名首字母没大写 | 跨包的名字首字母必须大写英文 |
+| `json.Marshal (value of type func(v any) ([]byte, error)) is not a type` | 把函数当成字段类型写进 struct | struct 里只能填类型，字段类型是 `string` |
 
 ---
 
-## 19. 本周实际写过的文件
+## 20. 本周实际写过的文件
 
 | 文件 | 内容 |
 |---|---|
@@ -944,7 +1134,9 @@ func 报告(s 形状) {
 | `stu-manager/funcs_test.go` | 第一个项目内测试文件：`删除`(4 用例) / `查找`(3 用例) / `修改`(3 用例) 三张表驱动测试，全 PASS，覆盖率 11.3%（10-23） |
 | `Past2/练习/testing_1021/`（非仓库） | testing 练习场：`及格` / `平均分` + 普通测试 + 表驱动测试（覆盖率 77.8%） |
 | `Past2/练习/1023/`（非仓库） | map/interface 手打练习：A nil map / B v,ok+delete / C map 排序 / D 接口+any+类型断言，各打 2–3 遍 |
+| `model/model.go` | `package model`：`Student` 结构体从 `main.go` 迁出（10-24 拆包第 1 步） |
+| `store/store.go` | `package store`：`Storage` 接口 + `FileStore` 实现（`Load`/`Save`），10-24 拆包第 2–3 步 |
 
 ---
 
-*最后更新：2026-10-23*
+*最后更新：2026-10-25*
