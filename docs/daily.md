@@ -193,7 +193,7 @@
 
 ---
 
-*最后更新：2026-10-25*
+*最后更新：2026-10-27*
 
 ## 10-26（周一 · 巩固日 · 不学新知识）
 
@@ -225,3 +225,47 @@
 - W3 并发入门（goroutine / channel）正式开课
 
 **数字**：9 段通过 / 约 5h50m / 0 commit（巩固日不产出代码提交）
+
+---
+
+## 10-27（周二 · W3 第 2 天 · 巩固日续做 + 并发开课）
+
+**学到**
+
+- goroutine：`go 函数()` 派后台任务；`main` 一结束全部消失；顺序不固定（同一程序跑两次甲乙谁先都可能）
+- 时间单位：`time.Second` / `Millisecond` / `Microsecond`；`1200 * time.Microsecond` = 1.2 毫秒（想睡 1.2 秒会一行输出都没有）；浮点常量乘 Duration 报 `truncated to int64`
+- `sync.WaitGroup`：`Add(n)` + `defer wg.Done()` + `Wait()`；必须传 `*sync.WaitGroup` 和 `&wg`
+- 数据竞争实证：`总数++` 各 1000 次，跑 8 次结果 `24232 / -35063 / -19139 / -66785 / -33253 / -49609 / 30103 / -53394`，一次都不是 0
+- `x++` 是三步（读、算、写）；加 `sync.Mutex` 的 `Lock/Unlock` 后跑 5 次稳定 0
+- channel：`ch <- 42` 送、`x := <-ch` 接；无缓冲要手递手；`make(chan int, 3)` 有缓冲（实测 `len = 3 cap = 3`，读出来是 1 先进先出）
+- `close(ch)` + `for v := range ch` 自动收完退出；关了之后再读是 `0 false`
+- `select` 每次只走一个 case、多个就绪时随机选、没 default 且全空就阻塞
+- `select` + `time.After(100 * time.Millisecond)` 做超时；`select` + `default` 做不阻塞版本
+- 巩固日续做：A10 从零 3 遍（第 1 遍 4 分 20 秒全对）、A11 Store 接口 3 遍、A12 MemStore 3 遍（含 CounterStore 变体）
+
+**卡住 / 教训**
+
+- `go` 忘了写 → 输出完全串行（G1 第 1 遍）
+- `time.Sleep(1200 * time.Microsecond)` → 一行输出都没有（把毫秒写成微秒）
+- WaitGroup：`go 干活(i, &wg)` → `undefined: 干活`（把别的演示里的函数名搬过来了）；`go 中($wg)` → `invalid character U+0024 '$'`
+- WaitGroup 第 2 遍漏 `wg.Add(3)` → `Wait()` 立刻返回，输出只有两句 main
+- `var wg sync.WaitGroup{` 多花括号 → `syntax error: non-declaration statement outside function body`
+- channel 方向写反 `C <- ch` → `undefined: C`
+- `select` 只写一次没套 for → 只处理一个就结束（C4 第 2 遍）
+- 练习文件建了没真生成 / 漏占位行（C2、C3、C4b 各一次），被用户连续抓到 → 之后每次都 `cat -n` 复核
+
+**明天（10-28）**
+
+- C4c 第 3 遍（无缓冲双生产者）→ 5 生产者 2 消费者（W3 第 1 项验收）
+- sync 6h（W3 第 2 项）
+- 巩固日剩余 A13–A15 + B1–B10
+- 今天净学约 2h（16:21–19:48），计划 5.5h，缺口顺延
+
+**数字**
+
+- 今天 0 代码 commit（练习都在 `Past2`，按 §10.10 不进 git），只有文档提交
+- 两仓库 commit：本文档一条
+- 巩固日进度 12 / 15
+- 净学时约 2h / 计划 5h30m
+
+*最后更新：2026-10-27*
