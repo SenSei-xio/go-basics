@@ -1074,10 +1074,235 @@ func 丁(list []model.Student) ([]model.Student, error)  // 1 进 2 出
 | `malformed import path "baodemo/甲": invalid char '甲'` | 汉字包名 |
 | `json.Marshal (value of type func(v any) ([]byte, error)) is not a type` | 把函数当成字段类型写进 struct |
 
-## 19. 报错原文速查
+---
+
+## 19. 并发入门（10-27 · W3 第 2 天）
+
+> 本节所有输出都是实跑结果，不是抄的。
+
+### 19.1 goroutine：`go` 一下就是后台任务
+
+```go
+go 烧水(1)   // 派出去，不等它
+```
+
+**三句话**（每句都踩过坑）：
+
+1. `go 函数()` = 派一个后台任务，主函数不等它
+2. **`main` 一结束，整个程序退出，后台任务全部消失**（实测：加了 `go` 反而一行输出都没有，因为 main 先跑完了）
+3. goroutine 之间的执行顺序**不固定**（同一个程序跑两次，甲乙谁先都可能）
+
+```go
+go 数数("甲")     // 实测输出顺序：甲1 乙1 甲2 乙2 甲3 乙3（也可能反过来）
+go 数数("乙")
+time.Sleep(2 * time.Second)   // 给后台任务留时间
+```
+
+### 19.2 时间单位（很容易错）
+
+| 写法 | 等于 |
+|---|---|
+| `time.Second` | 1,000,000,000 纳秒 |
+| `time.Millisecond` | 1,000,000 纳秒 |
+| `time.Microsecond` | 1,000 纳秒 |
+
+**坑**：`time.Sleep(1200 * time.Microsecond)` = 1.2 毫秒，如果你想睡 1.2 秒，**一行输出都不会有**（程序早跑完了）。
+用整数毫秒最安全：`time.Sleep(1200 * time.Millisecond)`。
+
+**另一个坑**：浮点常量乘 Duration 会报错
+```
+.\du.go:6:6: 1.2 (untyped float constant) truncated to int64
+```
+
+### 19.3 WaitGroup：等所有后台任务干完
+
+```go
+var wg sync.WaitGroup
+wg.Add(3)                    // 说明有 3 个任务
+for i := 0; i < 3; i++ {
+	go func(n int) {
+		defer wg.Done()      // 干完一个减 1（defer 保证出了意外也执行）
+		干活(n, &wg)
+	}(i)
+}
+wg.Wait()                    // 卡住直到计数器归 0
+```
+
+**三条规矩**：
+
+| 写法 | 后果（实测） |
+|---|---|
+| `Done()` 比 `Add()` 多 | `panic: sync: negative WaitGroup counter` |
+| 忘了 `Add(n)` | `Wait()` 立刻返回（计数器初始就是 0），后台任务全没等 |
+| `wg` 不传指针 | 函数里改的是副本，外面的计数器不动 → 必须 `*sync.WaitGroup` + `&wg` |
+
+### 19.4 数据竞争：两个人同时改一个数
+
+```go
+var 总数 = 0
+go 加(&wg)   // 1000 次 总数++
+go 减(&wg)   // 1000 次 总数--
+```
+
+**理论上应该是 0，实测 8 次全不是 0**：
+```
+24232 / -35063 / -19139 / -66785 / -33253 / -49609 / 30103 / -53394
+```
+
+**原因**：`x++` 是三步——①读出来 ②加一 ③写回去。两个 goroutine 交替做这三步，就会互相覆盖。
+
+**修法：`sync.Mutex`**
+```go
+var 锁 sync.Mutex
+func 加(wg *sync.WaitGroup) {
+	defer wg.Done()
+	for i := 0; i < 1000; i++ {
+		锁.Lock()
+		总数++
+		锁.Unlock()
+	}
+}
+```
+**加锁后跑 5 次，稳定 `总数 = 0`。**
+
+> 注意：锁保护的是**那段代码**（读—改—写的三步区间），不是「变量」。
+
+**`-race` 检测器在本机用不了**：
+```
+go: -race requires cgo; enable cgo by setting CGO_ENABLED=1
+```
+
+### 19.5 channel：goroutine 之间传数据的管道
+
+```go
+ch := make(chan int)   // 无缓冲：送的时候必须有别人接
+ch <- 42               // 送（箭头指向 ch）
+x := <-ch              // 接（箭头从 ch 出来）
+```
+
+**方向写反的报错**（我踩过）：
+```
+.\ch.go:8:2: undefined: C      // 写成了 C <- ch
+```
+
+**收了但没人发 → 死锁**：
+```
+fatal error: all goroutines are asleep - deadlock!
+```
+
+### 19.6 有缓冲 / 无缓冲
+
+```go
+ch := make(chan int, 3)   // 有缓冲：能先存 3 个
+ch <- 1
+ch <- 2
+ch <- 3
+fmt.Println(len(ch), cap(ch))   // 实测：3 3
+fmt.Println(<-ch)               // 实测：1（先进先出），剩余 len = 2
+```
+
+**区别**：无缓冲是「手递手」，有缓冲是「先放快递柜」。
+
+### 19.7 close + range：生产者送完就关
+
+```go
+func 生产者(ch chan int) {
+	for i := 1; i <= 5; i++ {
+		ch <- i
+	}
+	close(ch)     // 送完必须关，否则消费者 range 永远等
+}
+
+for v := range ch {    // 自动收完、自动退出
+	fmt.Println(v)      // 实测 1 2 3 4 5
+}
+```
+
+**`v, ok := <-ch` 判断关没关**：
+```go
+v, ok := <-ch
+fmt.Println(v, ok)   // 关了之后实测：0 false
+```
+
+**易错**：忘了 `close` → 消费者死等；`close` 之后再送 → panic；`close` 只能关一次。
+
+### 19.8 select：同时等好几个 channel
+
+```go
+select {
+case v := <-快ch:
+	fmt.Println("收到：", v)
+case v := <-慢ch:
+	fmt.Println("收到：", v)
+}
+```
+
+**实测输出**（快 200ms 一个、慢 500ms 一个，收 6 次）：
+```
+收到： 快-1
+收到： 快-2
+收到： 慢-1
+收到： 快-3
+收到： 快-4
+收到： 慢-2
+```
+
+**三条规矩**：
+
+| # | 规矩 |
+|---|---|
+| 1 | 每次只执行**一个** case（不像 switch 顺序判断） |
+| 2 | 多个 case 同时就绪 → **随机选一个** |
+| 3 | 没有 `default` 且全空 → **阻塞等待** |
+
+### 19.9 select + 超时（`time.After`）
+
+```go
+for i := 0; i < 4; i++ {
+	select {
+	case v := <-ch1:
+		fmt.Println(v)
+	case v := <-ch3:
+		fmt.Println(v)
+	case <-time.After(100 * time.Millisecond):
+		fmt.Println("超时了")
+	}
+}
+```
+
+**`time.After(时长)` = 造一个 channel，等这么久才往里放一个值。** 放进 `select` 里就是「最多等这么久」。
+
+**实测**（ch1、ch3 各 1 个，ch2 空）：
+```
+来自 1 号
+来自 3 号
+超时了
+超时了
+```
+
+**select + default = 不阻塞版**（试一下，没有就走 default）：
+```go
+select {
+case ch <- "甲":
+	fmt.Println("塞进去了")
+default:
+	fmt.Println("满了塞不进去")
+}
+```
+
+
+---
+
+## 20. 报错原文速查
 
 | 报错 | 意思 | 修法 |
 |---|---|---|
+| `panic: sync: negative WaitGroup counter` | Done() 比 Add() 多 | 检查 Add 的数和 Done 的次数是否相等 |
+| `go: -race requires cgo; enable cgo by setting CGO_ENABLED=1` | 本机跑 `-race` 缺 cgo | 本机用不了，靠 mutex 实测验证（10 万次跑 8 遍） |
+| `fatal error: all goroutines are asleep - deadlock!` | 收了但没人发 / 送但没人接 | 检查每个 channel 两端都有人在 |
+| `1.2 (untyped float constant) truncated to int64` | 浮点常量乘 `time.Duration` | 用整数毫秒 `1200 * time.Millisecond` |
+| `undefined: C` | channel 方向写反（`C <- ch`） | 送是 `ch <- 42`，接是 `x := <-ch` |
+| `too many return values` / `have ([]model.Student, nil, int)` / `want ([]model.Student, error)` | return 的值个数超过函数声明的 | 数 `func` 那行括号里有几个返回值 |
 | `no new variables on left side of :=` | `:=` 左边没有新变量 | 换成 `=`，或者换个新名字 |
 | `undefined: s` | 这个变量没声明过 | 补 `:=` 或 `var` |
 | `append (built-in function) is not a type` | 把 `append` 当类型名用了 | 做卡用 `Student{...}` |
@@ -1118,7 +1343,7 @@ func 丁(list []model.Student) ([]model.Student, error)  // 1 进 2 出
 
 ---
 
-## 20. 本周实际写过的文件
+## 21. 本周实际写过的文件
 
 | 文件 | 内容 |
 |---|---|
@@ -1139,4 +1364,4 @@ func 丁(list []model.Student) ([]model.Student, error)  // 1 进 2 出
 
 ---
 
-*最后更新：2026-10-25*
+*最后更新：2026-10-27*
