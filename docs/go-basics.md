@@ -1293,7 +1293,154 @@ default:
 
 ---
 
-## 20. 报错原文速查
+## 20. sync 与 atomic（10-30 · W3 第 5 天）
+
+### 20.1 `sync.WaitGroup`——等一组协程干完
+
+**问题**：`go` 起协程后 main 直接往下跑，main 结束程序就退出，后台任务全丢。
+
+```go
+for i := 1; i <= 3; i++ {
+	go 干活(i)
+}
+fmt.Println("main 结束了")   // 输出只有这一行，三个活一行没打
+```
+
+**四件套，注意谁写**：
+
+| # | 谁写 | 代码 | 意思 |
+|---|---|---|---|
+| 1 | 老板（main） | `var wg sync.WaitGroup` | 造计数器，初始 0 |
+| 2 | 老板（main） | `wg.Add(3)` | 报数：有 3 件活 |
+| 3 | 干活的 | `defer wg.Done()` | 干完报到，计数器 -1 |
+| 4 | 老板（main） | `wg.Wait()` | 堵住，等计数器归 0 |
+
+```go
+func 干活(编号 int, wg *sync.WaitGroup) {
+	defer wg.Done()
+	time.Sleep(time.Duration(编号) * 100 * time.Millisecond)
+	fmt.Println("第", 编号, "个干完了")
+}
+
+func main() {
+	var wg sync.WaitGroup
+	wg.Add(3)
+	for i := 1; i <= 3; i++ {
+		go 干活(i, &wg)     // 必须 &wg
+	}
+	wg.Wait()
+	fmt.Println("全部完成")
+}
+```
+
+**四种错法（全部实跑）**：
+
+| 错法 | 输出 | 原因 |
+|---|---|---|
+| 漏 `Add` | 只打 `全部完成` | 计数器本来 0，`Wait` 立刻放行 |
+| 传值不传 `&` | 三行都打，然后 `fatal error: all goroutines are asleep - deadlock!` | 每个协程拿到副本，倒计时倒在自己身上，main 的原件永远 3 |
+| `Done` 多于 `Add` | `panic: sync: negative WaitGroup counter` | 减到负数就 panic |
+| `Add` 写在干活函数里 | **时对时错**（连跑 3 次：2 次碰巧对、1 次全丢） | main 跑到 `Wait` 时协程可能还没启动，计数器还是 0 |
+
+**铁律**：`Add` 必须由老板在 `go` 之前报数，不能交给干活的自己报。
+
+### 20.2 `sync.Once`——某件事只干一次
+
+**问题**：5 个协程抢着初始化，做了 5 次。
+
+```go
+var 只执行一次 sync.Once
+
+var wg sync.WaitGroup
+for i := 0; i < 5; i++ {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		只执行一次.Do(初始化)     // 只有第一个能进去
+	}()
+}
+wg.Wait()
+```
+输出 `初始化执行了！次数 = 1`（不是 5）。
+
+**要点**：
+- `Once` 是**变量**（`var 只执行一次 sync.Once`），不是函数
+- `.Do(函数名)` —— **传函数名，不写括号**
+- 不管几个协程抢，只有第一个进去，剩下的直接跳过
+
+### 20.3 `atomic`——安全地加减同一个数
+
+**问题**：`x++` 不是一步，是「读 → 算 → 写」三步。两个协程同时做会互相覆盖。
+
+```go
+累加++    // 2 个协程各 10 万次
+```
+实跑三次：`139677` / `173992` / `138242`（应该是 200000）。
+
+**解法**：
+
+```go
+import "sync/atomic"
+
+var 累加 atomic.Int64     // 注意：类型是 atomic.Int64，不是 int64
+
+累加.Add(1)               // 加
+累加.Load()               // 读
+```
+实跑三次全是 `200000`。
+
+**两个坑**：
+- `atomic.Int64` **不能直接 `累加++`**，必须 `.Add(1)`
+- **打印必须 `.Load()`**，直接 `fmt.Println(累加)` 会打出 `{{} {} 200000}`（它是结构体）
+
+### 20.4 三者对比
+
+| 工具 | 解决什么 | 怎么写 |
+|---|---|---|
+| `sync.WaitGroup` | 等一组协程干完 | `var wg sync.WaitGroup` + `wg.Add(n)` + `defer wg.Done()` + `wg.Wait()` |
+| `sync.Once` | 某件事只做一次 | `var once sync.Once` + `once.Do(函数)` |
+| `atomic.Int64` | 安全地加减同一个数 | `var n atomic.Int64` + `n.Add(1)` / `n.Load()` |
+| `sync.Mutex` | 保护一段代码（不只是数字） | `var 锁 sync.Mutex` + `锁.Lock()` + `defer 锁.Unlock()` |
+
+**选择口诀**：**等完成 → WaitGroup；只做一次 → Once；加减数 → atomic；一段代码 → Mutex。**
+
+### 20.5 自定义 `io.Writer`（10-30 B1）
+
+`io.Copy(目的地, 来源)` 只要求目的地满足一个条件：**有 `Write(b []byte) (int, error)` 方法**。
+
+```go
+type 计数器 struct {
+	累计 int
+	总共 int
+}
+
+func (c *计数器) Write(b []byte) (int, error) {
+	c.累计 = c.累计 + len(b)
+	fmt.Printf("收到 %d 字节，累计 %d / %d\n", len(b), c.累计, c.总共)
+	return len(b), nil
+}
+
+func main() {
+	源 := strings.NewReader("你好世界")
+	目标 := &计数器{总共: 100}
+	io.Copy(目标, 源)
+}
+```
+输出：
+```
+收到 12 字节，累计 12 / 100
+```
+
+**三条铁律**：
+1. 方法名必须是 `Write`（大写 W），参数 `b []byte`，返回 `(int, error)`
+2. **必须 `return len(b), nil`** —— 返回 0 会让 `io.Copy` 报 `short write`
+3. 接收者用**指针**（要改 `c.累计`），main 里传 `&计数器{}`
+
+**`io.Writer` 是一张要求清单，不是具体类型**：
+- `io.Discard`（黑洞）、`bytes.Buffer`、`os.File` 都自带 `Write`
+- 要打印进度 → 没人自带，必须自己造
+
+## 21. 报错原文速查
 
 | 报错 | 意思 | 修法 |
 |---|---|---|
@@ -1340,10 +1487,19 @@ default:
 | `package stu-manager/mode1 is not in std` | `model` 打成 `mode1`（数字 1） | 改回字母 l |
 | `cannot refer to unexported method 保存` / `save` | 跨包的方法名首字母没大写 | 跨包的名字首字母必须大写英文 |
 | `json.Marshal (value of type func(v any) ([]byte, error)) is not a type` | 把函数当成字段类型写进 struct | struct 里只能填类型，字段类型是 `string` |
+| `received %!d(MISSING)` / `%!d(MISSING)` | Printf 模板里 %d 没配参数 | 几个 %d 就跟几个值 |
+| `short write` | 自定义 Write 返回 0 | 必须 `return len(b), nil` |
+| `{{} {} 200000}` 打印出来是这坨 | atomic.Int64 直接 Println | 用 `.Load()` 取值 |
+| 只打 `全部完成` 三行没打 | WaitGroup 漏了 Add | Add 必须在 go 之前报数 |
+| `numeric argument to make` / `cannot use 计数器{} ... method Write has pointer receiver` | 指针接收者的方法，给的是值 | 传 `&计数器{}` |
+| received %!d(MISSING) | Printf 模板里 %d 没配参数 | 几个 %d 就跟几个值 |
+| short write | 自定义 Write 返回 0 | 必须 return len(b), nil |
+| `{{} {} 200000}` | atomic.Int64 直接 Println | 用 .Load() 取值 |
+| 只打「全部完成」前面三行没了 | WaitGroup 漏了 Add | Add 必须在 go 之前报数 |
 
 ---
 
-## 21. 本周实际写过的文件
+## 22. 本周实际写过的文件
 
 | 文件 | 内容 |
 |---|---|
@@ -1364,4 +1520,4 @@ default:
 
 ---
 
-*最后更新：2026-10-27*
+*最后更新：2026-10-30*
