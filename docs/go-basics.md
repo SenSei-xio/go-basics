@@ -1132,7 +1132,9 @@ wg.Wait()                    // 卡住直到计数器归 0
 
 | 写法 | 后果（实测） |
 |---|---|
-| `Done()` 比 `Add()` 多 | `panic: sync: negative WaitGroup counter` |
+| `Done()` 比 `Add()` 多 | `WARNING: DATA RACE`（带 Read at / Previous write at + 行号） | 两个 goroutine 同时读写同一块内存 | 加 `sync.Mutex`（Lock 放 sleep 之后）或改用 `atomic` |
+| `all goroutines are asleep - deadlock!` + `goroutine 1 [chan send]` | 无缓冲 channel 送了没人接 | 送之前必须有接收方，或加缓冲 `make(chan int, 1)` |
+| `panic: sync: negative WaitGroup counter` |
 | 忘了 `Add(n)` | `Wait()` 立刻返回（计数器初始就是 0），后台任务全没等 |
 | `wg` 不传指针 | 函数里改的是副本，外面的计数器不动 → 必须 `*sync.WaitGroup` + `&wg` |
 
@@ -1440,7 +1442,189 @@ func main() {
 - `io.Discard`（黑洞）、`bytes.Buffer`、`os.File` 都自带 `Write`
 - 要打印进度 → 没人自带，必须自己造
 
-## 21. 报错原文速查
+## 21. GMP 调度（11-01 · W3 第 7 天）
+
+### 21.1 三个字母
+
+| 字母 | 全称 | 一句话 | 数量 |
+|---|---|---|---|
+| **G** | Goroutine | 协程，一个 `go 函数()` 就是一个 G | 几万个都行 |
+| **M** | Machine | 操作系统线程，真正干活的 | 按需创建 |
+| **P** | Processor | **不是 CPU 核，是「干活许可证」** | = `GOMAXPROCS`（本机 12） |
+
+**最关键：M 想干活，必须先拿到一个 P。**
+
+### 21.2 本机实测
+
+```
+逻辑 CPU 数（P 的个数）: 12
+GOMAXPROCS（Go 实际用的 P 个数）: 12
+开始时 goroutine 数: 1
+起了 5 个之后 goroutine 数: 6
+全部干完后 goroutine 数: 1
+```
+
+`runtime.NumCPU()` / `runtime.GOMAXPROCS(0)` / `runtime.NumGoroutine()` 三个函数。
+
+### 21.3 调度三步
+
+1. **新订单 → 先扔进当前 P 的本地队列**（每 P 最多 256 个，不用加锁所以快）
+2. **工位空了 → 先看自己本地队列** → 没有就去全局队列拿（要加锁，慢）→ 全局也没有就 **偷**（随机挑一个别人的 P，偷它一半，叫 work stealing）
+3. **G 阻塞时（Sleep / 网络 / channel）→ 和 P 解绑**，P 立刻去干别的活；G 等条件满足后重新排队拿 P
+
+### 21.4 两个反直觉的实测
+
+**① P 限制的是「同时跑 CPU 的个数」，不是「活着多少协程」**
+
+100 个 goroutine 各睡 200ms：
+```
+100 个已派出，goroutine 数: 101
+100 个睡完，总耗时: 199.8315ms
+```
+100 个协程不是靠 12 个 P 排队跑完的 —— 它们在睡的时候把 P 让出来了。
+
+**② `GOMAXPROCS=1` 不等于串行**
+
+纯 CPU 任务（算 5 亿次）+ 睡觉任务：
+```
+GOMAXPROCS=12 → 总耗时 501.7033ms
+GOMAXPROCS=1  → 总耗时 501.2319ms
+```
+一模一样。因为睡的那个在睡觉时让出了 P。
+
+### 21.5 异步抢占（Go 1.14+）
+
+`GOMAXPROCS=1` 下，一个死循环（算 3 亿次）+ 一个睡 50ms 的任务：
+```
+快任务（睡了 50ms）在 69.5057ms 就完成了
+慢任务算完 574.4198ms
+```
+**理论上 1 个 P 会被死循环占死，但它被强行打断了** —— Go 1.14 起每 10ms 发一次信号做异步抢占，所以长循环不会饿死别的协程。
+
+### 21.6 工厂类比
+
+- **G** = 订单（几十万个都行）
+- **P** = 工位（12 个，固定）
+- **M** = 工人（可以很多，但**同时只能 12 个坐在工位上**）
+- **全局队列** = 公共订单池（兜底）
+- **P 的本地队列** = 工位边上的小筐（≤256 个）
+
+
+
+## 22. Mutex 实战：用 -race 找竞态（11-01 · W3 第 7 天）
+
+### 22.1 一道有 3 处竞态的题
+
+```go
+type 统计器 struct {
+	处理数   int
+	总耗时   time.Duration
+	最后完成 string
+}
+
+func 干活(s *统计器, 编号 int) {
+	time.Sleep(time.Duration(编号*10) * time.Millisecond)
+	s.处理数++                                              // 竞态 1
+	s.总耗时 += time.Duration(编号*10) * time.Millisecond     // 竞态 2
+	s.最后完成 = fmt.Sprintf("工人%d", 编号)                 // 竞态 3
+}
+```
+
+5 个 goroutine 同时改同一个 `s`。**普通 `go run` 输出看起来完全正确**（`处理数 = 5 / 总耗时 = 150ms / 最后完成 = 工人5`）—— 因为窗口太窄，只能靠 `-race` 抓。
+
+### 22.2 `-race` 的输出怎么读
+
+```
+D:\Past2\tools\race.cmd run -race .
+```
+
+```
+==================
+WARNING: DATA RACE
+Read at 0x00c0000943a0 by goroutine 9:
+  main.干活()
+      D:/Past2/练习/1101/sync/main.go:31 +0x5a
+  main.main.func1()
+      D:/Past2/练习/1101/sync/main.go:44 +0x87
+
+Previous write at 0x00c0000943a0 by goroutine 8:
+  main.干活()
+      D:/Past2/练习/1101/sync/main.go:31 +0x6f
+==================
+```
+
+| 输出里的词 | 意思 |
+|---|---|
+| `Read at ... by goroutine 9` | 9 号协程**读**了这块内存 |
+| `Previous write ... by goroutine 8` | 8 号协程**之前写过**同一块内存 |
+| 地址 `0x...3a0` / `0x...3a8` / `0x...3d0` | **三个不同地址 = 三个字段，所以 3 处竞态** |
+| 行号 `main.go:31` | 就是 `s.处理数++` 那一行 |
+
+**本次共 3 处**：`s.处理数`（31 行读/写）、`s.总耗时`（32 行读/写）、`s.最后完成`（33 行写/写）。
+
+### 22.3 修法：一把锁管三个字段
+
+```go
+type 统计器 struct {
+	处理数   int
+	总耗时   time.Duration
+	最后完成 string
+	锁       sync.Mutex     // ← 加字段
+}
+
+func 干活(s *统计器, 编号 int) {
+	time.Sleep(time.Duration(编号*10) * time.Millisecond)  // ← 睡在外面，并发不丢
+
+	s.锁.Lock()              // ← 加锁
+	defer s.锁.Unlock()      // ← 开锁（defer 保证 panic 也能开）
+	s.处理数++
+	s.总耗时 += time.Duration(编号*10) * time.Millisecond
+	s.最后完成 = fmt.Sprintf("工人%d", 编号)
+}
+```
+
+**`Lock` 必须放在 `time.Sleep` 之后** —— 放前面 5 个协程会排队睡 150ms，并发白做。
+
+修完 `-race` → **竞态数 0**，输出不变。
+
+### 22.4 为什么 `x++` 会丢数据
+
+`x++` 是**三步**：①读 ②算 ③写。两个 goroutine 同时执行：
+
+```
+甲：读 4  →  乙：读 4  →  甲：算 5  →  乙：算 5  →  甲：写 5  →  乙：写 5
+结果：两次 +1 只记成 1 次
+```
+
+实跑（10 goroutine × 10 万次无锁）：
+```
+总数 = 231323  （应该是 1000000）
+总数 = 327900  （应该是 1000000）
+总数 = 427669  （应该是 1000000）
+```
+
+加锁后稳定 1000000。
+
+### 22.5 三种保护手段怎么选
+
+| 手段 | 适合 | 不适合 |
+|---|---|---|
+| `sync.Mutex` | 一次要改**多个**字段（要一起改才一致） | 只有单字段且高频 |
+| `atomic.Int64` | **单个**数字的加减 | 结构体 / 多字段 |
+| `channel` | 传数据和交接所有权 | 单纯计数（杀鸡用牛刀） |
+
+**本题必须用 Mutex** —— 三个字段要一起改，atomic 管不过来。
+
+### 22.6 用 `-race` 的三个规矩
+
+1. **`-race` 需要 cgo + gcc**：本机用 `D:\Past2\tools\race.cmd`（或 `race.sh`）包装脚本，里面已设好 PATH/TMP/CGO_ENABLED
+2. **`-race` 跑得慢 5~20 倍**，只用来找问题，别拿来跑生产
+3. **`-race` 只能抓「实际发生了」的竞态**，没抓到的代码路径不代表没问题
+
+
+---
+
+## 23. 报错原文速查
 
 | 报错 | 意思 | 修法 |
 |---|---|---|
@@ -1492,14 +1676,10 @@ func main() {
 | `{{} {} 200000}` 打印出来是这坨 | atomic.Int64 直接 Println | 用 `.Load()` 取值 |
 | 只打 `全部完成` 三行没打 | WaitGroup 漏了 Add | Add 必须在 go 之前报数 |
 | `numeric argument to make` / `cannot use 计数器{} ... method Write has pointer receiver` | 指针接收者的方法，给的是值 | 传 `&计数器{}` |
-| received %!d(MISSING) | Printf 模板里 %d 没配参数 | 几个 %d 就跟几个值 |
-| short write | 自定义 Write 返回 0 | 必须 return len(b), nil |
-| `{{} {} 200000}` | atomic.Int64 直接 Println | 用 .Load() 取值 |
-| 只打「全部完成」前面三行没了 | WaitGroup 漏了 Add | Add 必须在 go 之前报数 |
 
 ---
 
-## 22. 本周实际写过的文件
+## 24. 本周实际写过的文件
 
 | 文件 | 内容 |
 |---|---|
@@ -1520,4 +1700,4 @@ func main() {
 
 ---
 
-*最后更新：2026-10-30*
+*最后更新：2026-11-01*
