@@ -570,4 +570,67 @@ W3 六项 4 达成 / 2 归零，周检测 3.5/4 通过 —— 这一周是硬扛
 
 **今天最值钱的一件事**：用户说「其实我应该是还有点笨，有点没懂怎么写」。真相不是笨，是**没人把「从概念到那一行代码」的桥搭出来**。我把 206 挖成 5 个空之后，他自己填完了——四行全对、两个边界全过。**「卡住」很多时候不是脑子的问题，是台阶太宽。**
 
-*最后更新：2026-11-04*
+
+## 2026-11-05（周四 · W4 第 4 天 · 起锚 84% + context 深入 + 下载器 v2 五段）
+
+> 这一天按用户要求压了两天的量（11-05 剩余 + 11-06 整天），14:30 干到 23:23，共 **8h53m**。
+
+### 学到
+
+1. **`context` 不是"传信号"，是"传一条可以被关闭的通道"**：`ctx.Done()` 返回 `<-chan struct{}`（只读单向），`cancel()` 干的事就是**关闭这个通道**，所以所有 `<-ctx.Done()` 同时醒来。
+2. **三种造法各有用途**：
+   - `context.Background()` —— 根，**本身不能取消**（`Done()` 返回 nil、`Err()` 返回 nil）只当起点
+   - `context.WithCancel(父)` —— 手动停，返回 `(ctx, cancel)`
+   - `context.WithTimeout(父, 时长)` —— 到点自动停，返回 `(ctx, cancel)`，**cancel 仍然必须调**（`go vet` 会抓你丢弃它：`the cancel function returned by context.WithTimeout should be called, not discarded, to avoid a context leak`）
+3. **两条错误值的区别**：`context.DeadlineExceeded` = 时间到了；`context.Canceled` = 有人主动 cancel。**判断用 `ctx.Err()`**。
+4. **取消是树形的**：取消子不影响兄弟，**取消父连带所有子**。实跑验证：取消子A 后子B 继续跑到第 5 步；取消根后子B 也停。
+5. **`WithValue` 只能往下传，不能往上**：子能看见父的值，父看不见子的。取不存在的 key 返回 `nil` 不报错，所以要用 `v, ok := ctx.Value(k).(int)`。
+6. **用 string 当 key 会撞车**：两处都写 `"id"`，后写的静默覆盖前面的，**不报错**。正解是自定义类型 `type 上下文键 string` + `const 任务ID键 上下文键 = "任务ID"`——Go 里类型不同就是不同 key。
+7. **`select` 里 `default` 决定"等"还是"看一眼"**：`select { case <-ctx.Done(): return; default: }` 是**非阻塞检查**；去掉 `default` 就变成阻塞等待，后台循环会卡死。
+8. **net/http 最小的三件套**：`http.HandleFunc("/路径", 函数)` + `func 函数(w http.ResponseWriter, r *http.Request)` + `http.ListenAndServe(":端口", nil)`。
+9. **`ListenAndServe` 是阻塞调用，永远不返回**：所以它后面的代码**一辈子不执行**——`go 后台工人()` 必须写在它**前面**。
+10. **每个接口的"输入从哪来"不一样**：`/download` 和 `/cancel` 从 body JSON（`json.NewDecoder(r.Body).Decode(&请求)`），`/status` 从 URL 查询串（`r.URL.Query().Get("id")` + `strconv.Atoi`）。**复制粘贴前先问输入从哪来**。
+11. **中文字段名永远不被 JSON 序列化，而且不报错**：`encoding/json` 用 `unicode.IsUpper` 判断导出，中文 `IsUpper=false` → 静默丢掉。必须英文字段名 + tag 保留中文（`ID int \`json:"id"\`` / `Status string \`json:"状态"\``）。
+12. **`map[int]*任务` 存指针才能改到原对象**：存值的话 `任务表[id].Status = "已取消"` 编译不过（map 元素不可寻址）。
+13. **加锁的三条铁律**（下载器里练出来的）：① 找活 + 标记"我来做"必须在**同一把锁**里 ② **干活时不持锁**（否则 `/status` 全卡） ③ 改结果时再拿一次锁。
+14. **超时下载的完整写法**：`子ctx, 子取消 := context.WithTimeout(ctx, 3*time.Second)` → `http.NewRequestWithContext(子ctx, "GET", url, nil)` → `http.DefaultClient.Do(req)` → `io.Copy(io.Discard, resp.Body)` + `resp.Body.Close()` → 用 `子ctx.Err() == context.DeadlineExceeded` 区分超时。**`defer 子取消()` 在 for 循环里不能用**（会攒到最后），必须手动调。
+15. **不读走 body 连接不释放**：`io.Copy(io.Discard, resp.Body)` 是必须的，否则连接池泄漏。
+
+### 卡住
+
+1. **`go` 写在 `ListenAndServe` 后面**（5B）：编译能过、服务能起，但后台工人**从没启动**，任务永远卡在"已排队"。实跑证据：建任务后 3 秒查仍是"已排队"，日志里 `开始下载` 出现 **0** 次。**这是同类错第 2 次**（上次是 `wg.Add` 写在 goroutine 里）。
+2. **`/status` 复制了 `/cancel` 的 body 解析**（5A）：导致 `undefined: 请求` 两处。根因是没区分"输入从哪来"。
+3. **中文字段名静默丢字段**（v5 第 2 段）：实跑只返回 `{"id":1}`，`网址`/`状态` 全没，**编译器一句都不提示**。
+4. **`context.Background()` 是"根本身不能取消"这件事一开始想不通**：问"根为什么是 Background，是因为根就是这个吗"。类比：没有开关的电源板 vs 插排。
+5. **`WithValue` 的 string key 撞车一开始没答出规避方法**（闭卷 Q3 扣了 0.0，方向对但没答"自定义类型"）。
+6. **`^` 的口头规则说反了**（起锚 Q1，第 2 次）：数值 8/14/6 全对，但嘴上说"两个相同才给1"——**应该是不一样才给 1**。
+7. **5C 第一次只写了 2 行** `req, _ := http.NewRequestWithContext(子ctx, ...)`：`子ctx` 从没定义（应先 `WithTimeout` 造），`resp`/`err` 声明了不用（编译错），状态不分成功失败。
+
+### 明天（11-06 · 用户只有 1~2 小时）
+
+1. **起锚 10 题 25min**（必考：`^` 规则 / `go` 与阻塞调用的顺序 / context 三个函数 / `Done()` 返回类型 / JSON 中文字段名）
+2. **收锚 20min**（11-05 已收，明天只记当天的）
+3. 若还有时间：`155 最小栈`（45min，W4 第 6 项算法第一道）
+4. 明确推掉：`net/http` 中间件、下载器 v2 的 `resp.StatusCode` 区分、读代码③、`docs/algo-wrong.md`
+
+### 数字
+
+- 起锚：**8.4/10 = 84%**（历史最高，前高 11-01/11-03 的 75%）
+- 学习时长：**8h53m**（14:30 → 23:23）
+- 新建产出：`docs/bits.md` **233 行 / 7 大节**；`练习/1105/context/` **7 个文件**；`go-downloader/v5/` **5 个文件**
+- 下载器 v5 五段：最小服务器 ✅ / 收任务+JSON ✅ / 任务表+Mutex ✅ / `/cancel` ✅ / `/status` ✅ / 后台工人 ✅ / 真下载+超时 ✅（**7 个接口全跑通，`-race` 零警告**）
+- 5C 三种状态实测：`已完成` / `超时`（3 秒超时生效）/ `失败`
+- 今日 commit：**1 条**（本条 + v5 目录单独提交）
+- 连续 commit：**22 天**
+
+### 今天的一件真事
+
+**用户问"今天学了多少，够支撑我明天不学吗"。我算完账说"不够"，但可以支撑"明天只做 45 分钟"。**
+
+他接着说：「收锚，明天我会腾出一两个小时学的，但是今天的这些和你说的一样，我大概率明天全忘，所以顺便给我一份复习文件，越详细越好，我睡前看看。」
+
+**这句话把问题说清楚了**：不是"学没学够"，是**"学了会忘"**。所以今晚多了一份 `复习-11-05.md`。
+
+**今天最值钱的一件事**：`go 后台工人()` 写在 `ListenAndServe` 后面那个 bug，我没直接说"你写错了"，而是**把他的 main 原样跑了一遍**——建任务、等 3 秒、再查，屏幕上是铁一般的"已排队"。他自己看到日志里 `开始下载` 出现 0 次。**这类错讲原理没用，得让程序自己说话。**
+
+*最后更新：2026-11-05*
