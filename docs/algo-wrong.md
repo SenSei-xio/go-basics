@@ -406,3 +406,60 @@ nil 的深度 = 0    ← 停
 ### 六、验证记录
 - 只补一个 `if` 字，其它一字未动 → **6/6 全过**
 - `go vet` 干净 / `gofmt -l .` 干净
+
+---
+
+## 006 · 协议头 pack / unpack（2026-11-22 · 非 LeetCode，但面试要手写）
+
+### 一、题目
+设计一个协议头（魔数 4 + 版本 2 + 长度 4 = 10 字节），写 `pack` 把正文打包成帧，写 `unpack` 从帧里切出正文。
+
+### 二、错在哪
+1. 空 3 写 `帧[7:10]` —— 只有 3 格，`PutUint32` 要 **4 格**
+   → `panic: runtime error: index out of range [3] with length 3`（`4_挖空练习.go:46`）
+2. 保留了 `_ = binary.BigEndian.PutUint32(...)` 的 `_ =`
+   → `binary.BigEndian.PutUint32(帧[0:4], 魔数) (no value) used as value`
+3. 顺序错：把 `copy(帧[头长度:], 正文)` 写在最上面
+
+### 三、正确解（背这个）
+
+```go
+const 头长度 = 10
+
+func pack(正文 []byte) []byte {
+    帧 := make([]byte, 头长度+len(正文))
+    binary.BigEndian.PutUint32(帧[0:4], 0x47414D45)          // 魔数 "GAME"
+    binary.BigEndian.PutUint16(帧[4:6], 0x0001)              // 版本
+    binary.BigEndian.PutUint32(帧[6:10], uint32(len(正文)))  // 长度
+    copy(帧[头长度:], 正文)                                   // 正文最后放
+    return 帧
+}
+
+func unpack(帧 []byte) ([]byte, error) {
+    if len(帧) < 头长度 {
+        return nil, fmt.Errorf("帧太短")
+    }
+    if binary.BigEndian.Uint32(帧[0:4]) != 0x47414D45 {   // 先校验魔数
+        return nil, fmt.Errorf("魔数不对：0x%X", binary.BigEndian.Uint32(帧[0:4]))
+    }
+    长度 := binary.BigEndian.Uint32(帧[6:10])             // 再读长度
+    if len(帧) < 头长度+int(长度) {
+        return nil, fmt.Errorf("正文不全")
+    }
+    return 帧[头长度 : 头长度+int(长度)], nil
+}
+```
+
+### 四、为什么这么设计
+- **魔数**：用来识别「这确实是我的协议的帧」，防止读到别的协议的数据
+- **长度前缀**：TCP 是字节流没有边界，只能靠长度自己数
+- **统一大端**：跨平台一致；小端读 300 会读成 **738,263,040**（741 万倍）
+
+### 五、踩过的坑
+1. **`Put*` 系列没有返回值**，`Uint*` 系列有返回值
+2. **`帧[a:b]` 是 b−a 格**，`uint32` 必须 4 格
+3. **魔数校验必须在读长度之前** —— 顺序反了会拿垃圾数据当长度越界
+4. **正文必须最后放** —— 先放正文再放头会覆盖正文
+
+### 六、下次复习要点（一句话）
+**`Put` 没返回值、`帧[a:b]` 有 b−a 格、先验魔数再读长度、正文最后 copy。**
