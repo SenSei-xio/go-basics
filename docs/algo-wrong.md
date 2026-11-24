@@ -463,3 +463,133 @@ func unpack(帧 []byte) ([]byte, error) {
 
 ### 六、下次复习要点（一句话）
 **`Put` 没返回值、`帧[a:b]` 有 b−a 格、先验魔数再读长度、正文最后 copy。**
+
+---
+
+## 007 · 聊天室 v0 四步（echo → 广播 → 心跳 → 断线广播）
+
+> 不是算法题，是「工程手感」错题。2026-11-24 一个晚上连续踩的坑，全部是手滑不是概念。
+> 记录原因：这些坑**每一个都会在真实项目里再踩一次**，而且编译器/运行时给的错信息很有迷惑性。
+
+### 一、四步各写了几遍
+
+| 步 | 文件 | 空数 | 结果 |
+|---|---|---|---|
+| echo 默写 | `D:\Past2\练习\1124\默写\默写_填空.go` | 6 | 第一遍 4/6，第二遍 6/6 |
+| 广播 | `D:\Past2\练习\1124\聊天室\1_广播_填空.go` | 5 | 第一遍空5 写错，改后全对 |
+| 心跳 | `D:\Past2\练习\1124\心跳\3_心跳完整骨架.go` | 3 | **一次全对**（含类型断言） |
+| 断线广播 | `D:\Past2\练习\1124\心跳\4_断开广播_填空.go` | 3 | 空1 忘写 for、空2/3 一次全对、少一个 `}` |
+
+### 二、错在哪（原文 + 报错）
+
+**错误 1：`conn.Write(内容[]byte)`**
+```
+.\1_广播_填空.go:68:21: syntax error: unexpected ], expected operand
+```
+→ `[]byte` 是**类型名**，不是**变量**。函数调用括号里只放值。
+
+**错误 2：`conn.Write(内容)` 写在 `for` 外面**
+```
+.\4_断开广播_填空.go:61:2: undefined: conn
+```
+→ `conn` 是 `for conn := range 合影` 里的**循环变量**，出了循环就不存在。
+
+**错误 3：`广播所有人` 少一个 `}`**
+```
+.\4_断开广播_填空.go:66:6: syntax error: unexpected name main, expected (
+```
+→ 报错指向 `func main()`，但**真正的原因在上面**：`for` 和 `func` 各需要一个 `}`，只写了一个。
+
+**错误 4：`名字 + "下线了\n"` 少空格**
+```
+A 收到: 127.0.0.1:61796下线了     ← 实际输出
+应该:   127.0.0.1:61796 下线了
+```
+→ 字符串拼接空格不会自动出现。
+
+**错误 5：文件没保存**
+22:22:53 我判卷 → 22:24:02 用户说「你再看看」→ 文件 mtime 真的变了。**中间 3 分钟我以为用户没改，其实是他没按 Ctrl+S。**
+
+**错误 6：`go run` 的临时 exe 占端口**
+```
+监听失败 listen tcp 127.0.0.1:19200: bind: Only one usage of each socket address
+```
+→ `go run` 编译到临时目录再执行，**关掉终端标签后临时 exe 可能还在跑**。要 `netstat -ano | grep :19200` 找 PID 再 `taskkill //PID xxx //F`。
+
+### 三、正确解（四段完整代码）
+
+**① echo 六动作（默写用）**
+```go
+ln, err := net.Listen("tcp", "127.0.0.1:19200")   // 开门
+if err != nil { fmt.Println("监听失败", err); return }
+defer ln.Close()
+for {
+    conn, err := ln.Accept()                       // 等
+    if err != nil { return }
+    go 处理客人(conn)                               // 交给协程
+}
+// 客人那边：
+for {
+    n, err := conn.Read(buf)                       // 读
+    if err != nil { return }                       // 判
+    conn.Write(buf[:n])                            // 发回去
+}
+```
+
+**② 广播（跳过发送者）**
+```go
+func (t *连接表) 广播(发送者 net.Conn, 内容 []byte) {
+    合影 := t.快照()
+    for conn := range 合影 {
+        if conn == 发送者 { continue }   // ← 唯一区别
+        conn.Write(内容)
+    }
+}
+```
+
+**③ 心跳**
+```go
+for {
+    conn.SetReadDeadline(time.Now().Add(15 * time.Second))   // 每次 Read 前重设
+    n, err := conn.Read(buf)
+    if err != nil {
+        ne, ok := err.(net.Error)
+        if ok && ne.Timeout() { fmt.Println("对方假死,踢掉") }
+        return
+    }
+    if string(buf[:n]) == "ping\n" {
+        conn.Write([]byte("pong\n"))
+        continue                          // 心跳不广播
+    }
+}
+```
+
+**④ 断线广播**
+```go
+func 处理客人(conn net.Conn) {
+    名字 := conn.RemoteAddr().String()
+    defer 表.广播所有人([]byte(名字 + " 下线了\n"))   // 后登记 → 先执行的是下面那行
+    defer conn.Close()
+}
+```
+
+### 四、为什么这么设计
+
+**为什么广播要 `for`**：TCP 是**点对点**，一个 `conn` 只代表一个客人。要发给 5 个人，只能 `Write` 5 次。没有「全员广播」这种能力——这是应用层自己实现的。
+
+**为什么每次 Read 前都要重设 deadline**：`SetReadDeadline` 设的是**这一次**的系统调用超时。它不会自动续期。设一次 = 只管一次 Read。不重设 = 第二次 Read 又变成无限等待。
+
+**为什么超时 = 3 × 心跳间隔**：允许丢 2 个心跳不误判。如果超时=心跳间隔，那「心跳晚到 1 毫秒」就误杀。
+
+**为什么 `defer` 顺序是「先关闭再广播」**：后进先出。先 `defer 广播`、后 `defer Close` → `Close` 先执行。这个顺序正好对：先断开，再告诉别人「他断开了」。
+
+### 五、踩过的坑（一句话版）
+1. **`conn.Write(值)` 不放类型**
+2. **`for` 外没有 `conn`**
+3. **少一个 `}` 报错会指到 `main`**
+4. **字符串拼接空格要自己加**
+5. **改完先 `Ctrl+S` 再回话**
+6. **`go run` 的残留进程会占端口**
+
+### 六、下次复习要点（一句话）
+**开门→等→交给协程；他那边读→判→发回去；发之前先拍合影；每次 Read 前重设 15 秒；`defer` 后进先出。**
