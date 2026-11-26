@@ -701,3 +701,121 @@ func max(a, b int) int {
 
 ### 六、一句话复习点
 **树的递归永远是三段：① 到底了返回边界值；② 中间处理（看题）；③ 缝合左右递归。三题只有 ③ 在变：交叉 / 或 / 取最大。**
+
+---
+
+## 009 · WebSocket hub 三空（登记 / 快照 / 加锁发送）
+
+**记录日期**：2026-11-26 ｜ **题源**：`4_hub骨架_挖空.go`（3 个空） ｜ **状态**：照着骨架填通，**未闭卷**
+
+### 一、三个空对照
+
+| 空 | 位置 | 正确答案 | 我填的 |
+|---|---|---|---|
+| 1 | `func (h *Hub) 加人(c *客户端)` | `h.成员[c] = true` | ✅ 一次对 |
+| 2 | `func (h *Hub) 快照() []*客户端` | `结果 := make([]*客户端, 0, len(h.成员))`<br>`for c := range h.成员 { 结果 = append(结果, c) }`<br>`return 结果` | ✅ 一次对（但提示里我把答案写出来了，等于抄） |
+| 3 | `func (h *Hub) 广播(...)` 的 goroutine 内 | `目标.conn.Write(context.Background(), websocket.MessageText, 内容)` | ✅ 一次对 |
+
+### 二、完整正确代码（hub 骨架）
+
+```go
+type 客户端 struct {
+	conn *websocket.Conn
+	写锁 sync.Mutex  // ★ 同一个 conn 不许并发写
+	昵称 string
+}
+
+type Hub struct {
+	mu   sync.RWMutex
+	成员 map[*客户端]bool
+}
+
+func (h *Hub) 加人(c *客户端) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.成员[c] = true
+}
+
+func (h *Hub) 快照() []*客户端 {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	结果 := make([]*客户端, 0, len(h.成员))
+	for c := range h.成员 {
+		结果 = append(结果, c)
+	}
+	return 结果
+}
+
+func (h *Hub) 广播(发送者 *客户端, 内容 []byte) {
+	名单 := h.快照()          // ★ 先拷贝，立刻释放锁
+	for _, c := range 名单 {
+		if c == 发送者 {
+			continue          // ★ 不给自己发
+		}
+		go func(目标 *客户端) {
+			目标.写锁.Lock()
+			defer 目标.写锁.Unlock()
+			目标.conn.Write(context.Background(), websocket.MessageText, 内容)
+		}(c)
+	}
+}
+```
+
+### 三、为什么这么设计
+
+**① 为什么 `websocket.Conn` 必须配写锁**
+`coder/websocket` 明确规定：**一个 `Conn` 同时只能有一个 writer**。两个 goroutine 同时 `Write` 会直接 panic：
+```
+concurrent write to websocket connection
+```
+而广播场景里，N 个客户端同时说话 = N 个 goroutine 同时往同一个 conn 写 → 必须加锁。
+（对比：`net.Conn` 的 Write 在 Go 里实际上也不建议并发，但协程调度下不容易炸；WS 是**明确禁止**。）
+
+**② 为什么「先拷贝再发」**
+`conn.Write` 是网络操作，可能卡几秒（对方网络差）。如果拿着读锁去写：
+- 所有人都卡在 `RLock()` / `Lock()` 上
+- 一个人网络差 = 整个房间卡死
+
+所以：**加锁 → 拷贝一份切片 → 解锁 → 慢慢发**。这和在 11-24 连接的 `快照()` 完全一样，只是换了连接类型。
+
+**③ 为什么 `if c == 发送者 { continue }`**
+广播的语义是「我说话，别人听」。不跳过自己的话，自己会收到自己的消息（终端里会出现自己说的两遍）。
+
+### 四、我踩过的坑（原文）
+
+**坑 1：提示里把答案写出来了**
+我原本在空 2 下面写的「提示」是完整可编译代码：
+```go
+// 提示：这么写
+结果 := make([]*客户端, 0, len(h.成员))
+for c := range h.成员 { 结果 = append(结果, c) }
+return 结果
+```
+这等于送分。用户（m18093 那次）已经当面指出过同一个问题：「空3是你自己填的」。
+**改正做法：提示只写「用 make 造切片 / 遍历 map 的键 append / 最后 return」，不写代码。**
+
+**坑 2：用户说「写了写了」，实际只填了 1 个空**
+`grep -n "____空"` 显示第 57、72 行还空着。
+**改正做法：交卷必须先跑 `go vet`，编译不过先自己看哪里空着，别急着说完成。**
+
+**坑 3：答案版的 defer 顺序错**
+原来写：
+```go
+hub.加人(c)
+defer hub.减人(c)                              // ← 先注册
+fmt.Printf("[系统] %s 走了，当前 %d 人\n", ..., len(hub.快照()))  // 后注册
+```
+defer 后进先出 → **先打印再减人** → 打印出「当前 2 人」时人还在表里。
+正确：
+```go
+defer func() {
+	hub.减人(c)                                                   // ← 先减
+	fmt.Printf("[系统] %s 走了，当前 %d 人\n", c.昵称, len(hub.快照()))
+}()
+```
+
+### 五、一句话复习点
+
+> **WS 的 hub = TCP 的连接表换了个连接类型。**
+> 加人 `h.成员[c] = true` → 快照（加读锁、造切片、遍历 append、解锁）→ 发送（每个 conn 一把写锁，`Write(ctx, MessageText, 内容)`）。
+> **多出来的一条规矩：`websocket.Conn` 不许并发写，所以连接身上必须挂一把 Mutex。**
