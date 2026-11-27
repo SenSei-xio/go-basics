@@ -1461,3 +1461,95 @@ W3 六项 4 达成 / 2 归零，周检测 3.5/4 通过 —— 这一周是硬扛
 **用户 23:11 自己填出 `h.成员[c] = true` 和快照那 4 行，并且实跑 `✅ B 收到 / ✅ A 没收到自己发的`。**
 **这是他从 TCP 连接表迁到 WebSocket 连接表的一次「同一套路换类型」——写锁那行他一开始都没意识到要点，填完就通了。**
 **但他自己也说了「这个明天还得重新来一遍」——他知道这是照着骨架填的，不是背出来的。这句自评比分数值钱。**
+
+---
+
+## 2026-11-27（周五 · 新计划第 5 天 · Protobuf 开课 + hub 闭卷默写）
+
+### 时间表
+- 16:28 开工（`date` 实测 16:28:44），TTS 五声线拉起（PID 6344，显存约 2GB）
+- 16:30–17:20 WebSocket hub 闭卷默写（`D:\Past2\练习\1127\hub默写.go`，3 空）
+- 17:22 出 11-27 起锚卷（8 题 + 附加）
+- 17:25–18:10 补课：`=` vs `:=`、并发写真相（纠正昨天的错误说法）
+- 18:10–22:13 用户离开（5 小时，中间接单）
+- 22:13:56 交卷 → 判分 **5.3/10 = 53%**
+- 22:19 用户选 B 进主课
+- 22:20–22:24 装 protoc 29.3 + protoc-gen-go v1.36.12
+- 22:25–22:59 Protobuf 五课 + 挖空练习
+- 22:59:14 用户交卷 **4/4 全对**
+- 23:20 补讲「为什么必须传指针」+「`18 01` 是什么」
+- 23:22 收锚
+
+### 学到
+
+1. **`=` vs `:=` 的判断法**：看到 `=` 先问「这个变量上面有没有？没有就改成 `:=`」
+   - `for 科目 := range 分数` 变量只活在循环内
+   - `for 科目2 = range 分数` 改的是外面那个
+   - 外面没造就 `undefined: 科目3`
+
+2. **`coder/websocket` 并发写不 panic（我昨天说错了，今天纠正）**
+   - 实测两个 goroutine 各发 100 条 → 全部成功，无 panic 无报错
+   - 库源码 `write.go:29` 注释：「Only one writer can be open at a time, multiple calls will block until the previous writer is closed.」
+   - 库内部有 `writeMu` 自己排队
+   - **报 `concurrent write to websocket connection` 的是已归档的 gorilla/websocket，我搞混了两个库**
+
+3. **`net.Conn` 并发写必须加锁，防的是「字节交错」**
+   - 大块数据拆成多次系统调用，两个 goroutine 交错写入同一条 TCP 流
+   - 对端按长度前缀解析 → 读到半个包、长度字段被写坏、内存爆掉
+   - **粘包是「接收方一次读到多条」，并发写串字节是「发送方数据损坏」，两件事不能混**
+
+4. **WebSocket 握手三件套**：`Upgrade: websocket` / `Connection: Upgrade` / `Sec-WebSocket-Version: 13`
+   - 服务端回 **`101 Switching Protocols`（不是 200）**
+   - 握手后不再跑 HTTP 报文，改跑 WebSocket 帧
+
+5. **WS 帧四段**：`FIN(1bit) | opcode(4bit) | 长度(7/16/64bit) | 数据`
+   - 6 个 opcode：`0x0` Continuation / `0x1` Text / `0x2` Binary / `0x8` Close / `0x9` Ping / `0xA` Pong
+   - **WS 不用处理粘包**：帧头写着长度
+
+6. **Protobuf 原理**：不传字段名，只传「字段编号 + 值」
+   - 每字段前 1 字节 = 高 5 位字段编号 + 低 3 位类型
+   - 类型 0 = varint（数字）；类型 2 = 长度前缀（字节串）
+   - `0x0A` = 字段1+类型2（sender）；`0x12` = 字段2+类型2（content）；`0x18` = 字段3+类型0（type）；`0x20` = 字段4+类型0（time）
+   - 公式：`0x18 = 3 << 3 | 0`
+
+7. **`proto.Marshal` / `proto.Unmarshal` 两个 API**
+   - `proto.Marshal(m)` → `[]byte, error`（传 `*ChatMessage`）
+   - `proto.Unmarshal(数据, &收到的)` → **第 2 个参数必须传指针**
+   - 不写 `&` 编译不过：`chat.ChatMessage does not implement protoreflect.ProtoMessage (method ProtoReflect has pointer receiver)`
+
+8. **JSON vs Protobuf 实测**：65 vs 24 字节（省 63%）；10000 条 634.8 KB vs 234.4 KB（省 400 KB）
+   - PB 快 2~5 倍、体积小 40~70%、但抓包看不懂
+   - 场景：浏览器/调试用 JSON，服务器之间/客户端与服务器用 PB
+
+9. **Protobuf 三个致命的坑**
+   - 编号改了会**静默错乱**（不报错，sender 和 content 互换）
+   - 删字段不能复用编号，要用 `reserved 1;`
+   - proto3 不传默认值（空串/0/false），「用户真输入了空内容」和「没设置」分不出来，要区分用 `optional`
+
+### 卡住
+
+1. **hub 闭卷默写 2.5/3**：空1 写成 `delete(h.成员, c)`（把「加人」写成「减人」）；空2 `for c = range h.成员` → `undefined: c`
+2. **11-27 起锚 5.3/10 = 53%**：Q3 coder API **整题全空**（昨天亲手敲过的代码，闭卷一个都写不出）；附加题优雅关闭**全空**（11-24 才闭卷写过）
+3. **`0x18 = 1` 的原理不会**（问「`18 01` 是什么」时答不出）
+4. **「为什么必须传 `&`」原因说反**：答「怕被别人改成别的」，实际是「值传递改的是副本，本体不变」
+5. **protoc 写不进 junction**：`D:\Past2\练习` 是 OneDrive 软链，`protoc --go_out=.` 报 `Permission denied` → 必须输出到 `D:\Past2\tmp\` 再 `cp` 回来
+6. **中文字段名不导出**：`type 聊天消息 struct { 发送者 string }` → `json.Marshal` 出来是 `{}`（Go 只导出大写开头的字段）
+7. **`pb1127/chat` 包路径**：`.proto` 里 `option go_package = "pb1127/chat"` 必须与 `go.mod` 的 module 名一致，否则 `package pb1127/chat is not in std`
+
+### 明天（11-28 周六 · 第 6 天）
+1. 队首两笔：W5 缓冲补漏（0.25h）/ 玩中观察①（0.5h）
+2. 第 6 天原定：Protobuf 三种消息（登录/聊天/心跳）2.5h + 消息结构设计 2.5h
+3. **今天 Protobuf 三种消息已经跑通**（`10_三种消息编解码.go` 实跑：登录/聊天/心跳/信封 全部 ✅）→ 明天可以直接进「消息结构设计」或者开始把 Protobuf 接进聊天室
+
+### 数字
+- 起锚：1 场，**5.3/10 = 53%**（近 5 天最低）
+- 净学习：约 3 小时（16:28–17:25 约 1h + 22:19–23:22 约 1h + 判分/教学约 1h）
+- commit：1 条（本次）
+- 连续 commit：第 5 天（11-23~11-27）
+- 敲代码：hub 默写 3 空（2.5/3）+ Protobuf 4 空（4/4）
+- 学的新东西：Protobuf（原理 / .proto 语法 / protoc 生成 / 序列化反序列化 / 三种消息 / 五个坑）
+
+### 今天最值钱的一件事
+**用户自己说「这个明天还得重新来一遍，你得记住」。**
+**他在 m20722 说这句话的时候，hub 三空还没填。他知道自己是照着骨架填的，不是背出来的。**
+**这个自评比 5.3/10 那个分数值钱 —— 因为他知道自己的知识在哪个位置。**

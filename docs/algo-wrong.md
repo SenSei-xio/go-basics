@@ -15,7 +15,7 @@
 
 | 项 | 数量 |
 |---|---|
-| 已记录 | 5 道 |
+| 已记录 | 6 道 |
 | ⚠️ 会但写错 | 4 |
 | ❌ 完全不会 | 0 |
 | ✅ 一次通过 | 1 |
@@ -819,3 +819,171 @@ defer func() {
 > **WS 的 hub = TCP 的连接表换了个连接类型。**
 > 加人 `h.成员[c] = true` → 快照（加读锁、造切片、遍历 append、解锁）→ 发送（每个 conn 一把写锁，`Write(ctx, MessageText, 内容)`）。
 > **多出来的一条规矩：`websocket.Conn` 不许并发写，所以连接身上必须挂一把 Mutex。**
+
+---
+
+## 010 · Protobuf 序列化（2026-11-27 新增）
+
+### 一、错在哪
+
+**第一个错：以为 `.proto` 里的 `= 1` 是「默认值」。**
+
+```protobuf
+message ChatMessage {
+  string sender = 1;   // ← 这不是 sender 默认等于 "1"
+}
+```
+
+`= 1` 是**字段编号**，是这条数据在二进制流里的身份证号。改它 = 改协议。
+
+**第二个错：`proto.Unmarshal` 的第二个参数不写 `&`。**
+
+报错原文：
+```
+.\9_不写指针会怎样.go:19:33: cannot use 收到的 (variable of struct type chat.ChatMessage)
+as proto.Message value in argument to proto.Unmarshal:
+chat.ChatMessage does not implement protoreflect.ProtoMessage
+(method ProtoReflect has pointer receiver)
+```
+
+**第三个错：以为 protobuf 和 JSON 一样「字段名也传过去」。**
+
+字节 `0A 06 E5 B0 8F E6 98 8E` 里根本没有 `sender` 五个字母，只有编号 1。
+
+---
+
+### 二、正确解（完整代码）
+
+**`chat.proto`（完整）**：
+```protobuf
+syntax = "proto3";
+package chat;
+option go_package = "pb1127/chat";
+
+message ChatMessage {
+  string sender  = 1;
+  string content = 2;
+  int32  type    = 3;
+  int64  time    = 4;
+}
+message LoginRequest { string username = 1; string password = 2; }
+message LoginReply   { bool ok = 1; string token = 2; string message = 3; }
+message Ping { int64 time = 1; }
+message Pong { int64 time = 1; }
+
+message Envelope {
+  int32 msgType = 1;
+  bytes payload = 2;
+}
+```
+
+**生成命令**：
+```bash
+export PATH="/c/Users/26912/go/bin:/d/Past2/tools/protoc/bin:$PATH"
+protoc --go_out=. --go_opt=paths=source_relative chat.proto
+```
+
+**`6_挖空练习.go` 的四个空（答案）**：
+```go
+m := &chat.ChatMessage{Sender: "小明", Content: "你好", Type: 1, Time: 1700000000}
+数据, err := proto.Marshal(m)
+fmt.Printf("② 序列化后: %d 字节\n", len(数据))
+if err := proto.Unmarshal(数据, &收到的); err != nil { ... }
+```
+
+**实跑输出**：
+```
+① 造好了: sender:"小明" content:"你好" type:1 time:1700000000
+② 序列化后: 24 字节
+   字节头: 0A 06 E5 B0 8F E6 98 8E
+③ 反序列化后: sender:"小明" content:"你好" type:1 time:1700000000
+④ ✅ 内容一致
+```
+
+---
+
+### 三、为什么这么设计
+
+**1. 为什么只传编号不传字段名？**
+
+JSON 65 字节 → PB 24 字节，省 63%。字段名 `"sender"` 就 8 字节，比数据本身还长。**消息量一大，省下的全是带宽。**
+
+**2. 为什么用 varint 而不用固定 4/8 字节？**
+
+`Time: 1700000000` 用 varint 只占 5 字节；如果用固定 int64 要 8 字节。**小数字占得少，这是「常见值优先」的设计。**
+
+**3. 为什么编号必须稳定？**
+
+因为**编号是二进制的唯一身份**。字段名可以不传是因为接收方知道「1 号字段是 sender」。**编号一改，接收方就按错误的字段解析，而且不报错** —— 这是最恐怖的「静默数据错乱」。
+
+---
+
+### 四、字节逐个拆（`7_看懂那串字节.go` 实跑）
+
+```
+完整字节: 0A 06 E5 B0 8F E6 98 8E 12 06 E4 BD A0 E5 A5 BD 18 01 20 80 E2 CF AA 06
+
+[ 0] 0x0A = 00001010 → 字段编号 1 + 类型 2
+       └─ 长度 6，内容 = "小明"
+[ 8] 0x12 = 00010010 → 字段编号 2 + 类型 2
+       └─ 长度 6，内容 = "你好"
+[16] 0x18 = 00011000 → 字段编号 3 + 类型 0
+       └─ varint 值 = 1          ← Type = 1
+[18] 0x20 = 00100000 → 字段编号 4 + 类型 0
+       └─ varint 值 = 1700000000 ← Time
+```
+
+**公式：`0x18 = 3 << 3 | 0`**（字段编号左移 3 位，低 3 位放类型）
+
+| 标记字节 | 二进制 | 字段号 | 类型 | 说明 |
+|---|---|---|---|---|
+| `0x0A` | `00001_010` | 1 | 2 | 长度前缀（string） |
+| `0x12` | `00010_010` | 2 | 2 | 长度前缀（string） |
+| `0x18` | `00011_000` | 3 | 0 | varint（int32） |
+| `0x20` | `00100_000` | 4 | 0 | varint（int64） |
+
+---
+
+### 五、踩过的坑
+
+**坑 1：`protoc` 写不进 junction**
+```
+./chat.pb.go: Permission denied
+```
+根因：`D:\Past2\练习` 是 OneDrive 软链（reparse point），protoc 写不进去。
+解法：输出到 `D:\Past2\tmp\gen\`，再 `cp` 回来。
+
+**坑 2：中文字段名不导出**
+```go
+type 聊天消息 struct { 发送者 string }  // json.Marshal 出来是 {}
+```
+Go 只导出**大写字母开头**的字段。中文名不算大写 → 必须用 `Sender string`。
+
+**坑 3：`option go_package` 与 module 名不一致**
+```
+package pb1127/chat is not in std (D:\Past1\go\src\pb1127\chat)
+```
+`.proto` 里的 `option go_package = "pb1127/chat"` 必须和 `go.mod` 的 `module pb1127` + 子目录 `chat` 对上。
+
+**坑 4：改了编号不报错**
+```protobuf
+v1: string sender = 1; string content = 2;
+v2: string content = 1; string sender = 2;   // ← 静默错乱
+```
+老客户端发来的字节，新服务端按新编号解析 → sender 和 content 互换，**编译器不管，运行时不报错**。
+
+**坑 5：proto3 不传默认值**
+```
+Content 不赋值:   10 字节
+Content 赋空串:   10 字节   ← 完全一样
+```
+「用户真输入了空内容」和「没设置」分不出来 → 要区分用 `optional`。
+
+---
+
+### 六、一句话复习点
+
+> **Protobuf 就是「不传字段名、只传编号」的二进制序列化。**
+> 每字段前 1 字节：**高 5 位字段编号 + 低 3 位类型**（0=varint / 2=长度前缀）。
+> 两个 API：`proto.Marshal(m)` 和 `proto.Unmarshal(数据, &收到的)` —— **第二个参数必须传指针**，因为 Go 是值传递，不传指针改的是副本。
+> 编号一旦上线永久占用，删字段必须 `reserved`。
